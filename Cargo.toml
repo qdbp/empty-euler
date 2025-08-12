@@ -3,6 +3,24 @@ name = "rust"
 version = "0.1.0"
 edition = "2024"
 
+
+[[bench]]
+name = "primegen"
+harness = false
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+panic = "abort"
+debug = 1
+strip = false
+
+[profile.bench]
+inherits = "release"
+debug = 1
+
+
 [lib]
 name = "pe"
 path = "src/core.rs"
@@ -20,3 +38,8 @@ num-traits = "0.2.19"
 num-integer = "0.1.46"
 tracing = "0.1.41"
 tracing-subscriber = "0.3.19"
+static_assertions = "1.1.0"
+fixedbitset = "0.5.7"
+
+[dev-dependencies]
+criterion = { version = "0.7.0", features = ["html_reports"] }

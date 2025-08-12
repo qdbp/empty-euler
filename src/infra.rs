@@ -17,6 +17,8 @@ pub fn dispatch(id: &str, args: &[String]) -> Result<String> {
     f(args)
 }
 
+// The wonder of strongly types languages is that GPT-5 slop like this, dumped in by the bucketful,
+// ~~Just Works(tm)~~
 #[macro_export]
 macro_rules! soln {
     (  ( $( $name:ident : $ty:tt ),* ) $(,)? { $($body:tt)* } ) => {

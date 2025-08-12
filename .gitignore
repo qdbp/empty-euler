@@ -4,3 +4,7 @@ ps/
 debug
 target
 **/*.rs.bk
+
+# profiling cruft
+flamegraph.svg
+perf.data*
