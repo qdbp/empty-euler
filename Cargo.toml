@@ -1,0 +1,22 @@
+[package]
+name = "rust"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "pe"
+path = "src/core.rs"
+
+[[bin]]
+name = "pe"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+rug = { version = "1.27.0", features = ["num-traits"] }
+gmp-mpfr-sys = { version = "1.6.5", features = ["use-system-libs"] }
+num-traits = "0.2.19"
+num-integer = "0.1.46"
+tracing = "0.1.41"
+tracing-subscriber = "0.3.19"
