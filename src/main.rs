@@ -22,6 +22,9 @@ fn enable_tracing() {
 fn main() -> anyhow::Result<()> {
     enable_tracing();
     let cli = Cli::parse();
-    println!("{}", pe::infra::dispatch(&cli.id, &cli.args)?);
+    let with_name: Vec<String> = std::iter::once(cli.id.clone())
+        .chain(cli.args.iter().cloned())
+        .collect();
+    println!("{}", pe::infra::dispatch(&cli.id, &with_name)?);
     Ok(())
 }
