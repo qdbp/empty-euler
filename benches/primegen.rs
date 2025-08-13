@@ -6,7 +6,7 @@ use pe::math::primes::PrimeGen;
 fn bench_first_10m_primes(c: &mut Criterion) {
     c.bench_function("first_10m_primes_usize_collect", |b| {
         b.iter(|| {
-            let v: Vec<usize> = PrimeGen::<usize>::new().take(10_000_000).collect();
+            let v: Vec<u32> = PrimeGen::<u32>::new().take(10_000_000).collect();
             black_box(v);
         })
     });
@@ -14,7 +14,7 @@ fn bench_first_10m_primes(c: &mut Criterion) {
     // lower allocation noise: consume without collect
     c.bench_function("first_10m_primes_usize_iter", |b| {
         b.iter(|| {
-            let mut pg = PrimeGen::<usize>::new();
+            let mut pg = PrimeGen::<u32>::new();
             for _ in 0..10_000_000 {
                 black_box(pg.next().unwrap());
             }

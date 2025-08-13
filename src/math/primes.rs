@@ -4,6 +4,7 @@
 use core::ops::{Add, Mul, Neg, Sub};
 use fixedbitset::FixedBitSet;
 use num_traits::{Euclid, One, Zero};
+use std::borrow::Borrow;
 
 const INIT_PRIMES: &[u32] = &[2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47];
 const BASE_PRIMES: &[u32] = &[3, 5, 7];
@@ -232,40 +233,43 @@ impl<T> Int for T where
 {
 }
 
-// ---------- small helpers ----------
-
 #[inline]
 fn c<I: From<u32>>(u: u32) -> I {
     I::from(u)
 }
 #[inline]
-fn is_neg<I: Int>(x: &I) -> bool {
-    *x < I::zero()
+fn is_neg<I: Int>(x: impl Borrow<I>) -> bool {
+    *x.borrow() < I::zero()
 }
 #[inline]
-fn abs<I: Int>(x: I) -> I {
-    if is_neg(&x) { -x } else { x }
+fn abs<I: Int>(x: impl Borrow<I>) -> I {
+    if is_neg::<I>(x.borrow()) {
+        -x.borrow().clone()
+    } else {
+        x.borrow().clone()
+    }
 }
 #[inline]
-fn is_zero<I: Int>(x: &I) -> bool {
-    x.clone() == I::zero()
+fn is_zero<I: Int>(x: impl Borrow<I>) -> bool {
+    *x.borrow() == I::zero()
 }
 #[inline]
-fn is_one<I: Int>(x: &I) -> bool {
-    x.clone() == I::one()
+fn is_one<I: Int>(x: impl Borrow<I>) -> bool {
+    *x.borrow() == I::one()
 }
 #[inline]
-fn is_even<I: Int>(x: &I) -> bool {
+fn is_even<I: Int>(x: impl Borrow<I>) -> bool {
     let two = c::<I>(2);
-    x.rem_euclid(&two) == I::zero()
+    x.borrow().rem_euclid(&two) == I::zero()
 }
 #[inline]
-fn is_odd<I: Int>(x: &I) -> bool {
+fn is_odd<I: Int>(x: impl Borrow<I>) -> bool {
     !is_even(x)
 }
 
-fn ipow<I: Int>(mut base: I, mut exp: u32) -> I {
+fn ipow<I: Int>(base: impl Borrow<I>, mut exp: u32) -> I {
     let mut acc = I::one();
+    let mut base = base.borrow().clone();
     while exp > 0 {
         if exp & 1 == 1 {
             acc = acc * base.clone();
@@ -278,63 +282,67 @@ fn ipow<I: Int>(mut base: I, mut exp: u32) -> I {
     acc
 }
 
-fn pow_mod<I: Int>(base: &I, exp: &I, modulus: &I) -> I {
+fn pow_mod<I: Int>(base: impl Borrow<I>, exp: impl Borrow<I>, modulus: impl Borrow<I>) -> I {
     let mut acc = I::one();
     let two = c::<I>(2);
-    let mut base = base.rem_euclid(modulus);
-    let mut exp = exp.clone();
-    while !is_zero(&exp) {
-        if is_odd(&exp) {
+    let mut base = base.borrow().rem_euclid(modulus.borrow());
+    let mut exp = exp.borrow().clone();
+    while !is_zero::<I>(&exp) {
+        if is_odd::<I>(&exp) {
             acc = {
                 let a: &I = &(acc * base.clone());
-                a.rem_euclid(modulus)
+                a.rem_euclid(modulus.borrow())
             };
         }
         exp = exp.div_euclid(&two);
         let bb = base.clone() * base;
         base = {
             let a: &I = &bb;
-            a.rem_euclid(modulus)
+            a.rem_euclid(modulus.borrow())
         };
     }
     acc
 }
 
-pub fn gcd<I: Int>(mut a: I, mut b: I) -> I {
-    while !is_zero(&b) {
+pub fn gcd<I: Int>(a: impl Borrow<I>, b: impl Borrow<I>) -> I {
+    let (mut a, mut b) = (a.borrow().clone(), b.borrow().clone());
+    while !is_zero::<I>(&b) {
         let r = a.rem_euclid(&b);
         a = b;
         b = r;
     }
-    abs(a)
+    abs(&a)
 }
 
-pub fn modinv<I: Int>(a: &I, M: &I) -> Option<I> {
-    if *M <= I::zero() {
+pub fn modinv<I: Int>(a: impl Borrow<I>, M: impl Borrow<I>) -> Option<I> {
+    if *M.borrow() <= I::zero() {
         return None;
     }
 
-    let (mut a, mut m, mut r, mut x) = (a.clone(), M.clone(), I::zero(), I::one());
-    while !is_zero(&m) {
+    let (mut a, mut m, mut r, mut x) =
+        (a.borrow().clone(), M.borrow().clone(), I::zero(), I::one());
+    while !is_zero::<I>(&m) {
         let q = a.div_euclid(&m);
         (a, m, r, x) = (m.clone(), a.rem_euclid(&m), x.clone() - q * r.clone(), r)
     }
-    if is_one(&a) {
-        Some(x.rem_euclid(M))
+    if is_one::<I>(&a) {
+        Some(x.rem_euclid(M.borrow()))
     } else {
         None
     }
 }
 
-/// Exact port of Python `introot`.
-pub fn introot<I: Int>(n: &I, r: u32) -> Option<I> {
-    if is_neg(n) {
+pub fn introot<I: Int>(n: impl Borrow<I>, r: u32) -> Option<I> {
+    if is_neg::<I>(n.borrow()) {
         if r % 2 == 0 {
             return None;
         }
-        let x = introot(&abs(n.clone()), r)?;
+        let x = introot::<I>(&abs(n), r)?;
         return Some(-x);
     }
+
+    let n: &I = n.borrow();
+
     if *n < c(2) {
         return Some(n.clone());
     }
@@ -345,13 +353,13 @@ pub fn introot<I: Int>(n: &I, r: u32) -> Option<I> {
         // isqrt by doubling bound + binary search
         let two = c::<I>(2);
         let mut upper = I::one();
-        while ipow(upper.clone(), 2) <= n.clone() {
+        while ipow::<I>(&upper, 2) <= *n {
             upper = upper * two.clone();
         }
-        let mut lower = upper.clone().div_euclid(&two);
+        let mut lower = upper.div_euclid(&two);
         while lower.clone() + I::one() < upper {
             let mid = (lower.clone() + upper.clone()).div_euclid(&two);
-            let m2 = ipow(mid.clone(), 2);
+            let m2 = ipow::<I>(&mid, 2);
             if m2 == *n {
                 return Some(mid);
             }
@@ -366,13 +374,13 @@ pub fn introot<I: Int>(n: &I, r: u32) -> Option<I> {
     // generic r >= 3
     let two = c::<I>(2);
     let mut upper = I::one();
-    while ipow(upper.clone(), r) <= n.clone() {
+    while ipow::<I>(&upper, r) <= *n {
         upper = upper * two.clone();
     }
     let mut lower = upper.clone().div_euclid(&two);
     while lower.clone() + I::one() < upper {
         let mid = (lower.clone() + upper.clone()).div_euclid(&two);
-        let m = ipow(mid.clone(), r);
+        let m = ipow::<I>(&mid, r);
         if m == *n {
             return Some(mid);
         }
@@ -385,8 +393,7 @@ pub fn introot<I: Int>(n: &I, r: u32) -> Option<I> {
     Some(lower)
 }
 
-/// Exact port of Python `ispower` for r>0.
-pub fn ispower_r<I: Int>(n: &I, r: u32) -> Option<I> {
+pub fn ispower_r<I: Int>(n: impl Borrow<I>, r: u32) -> Option<I> {
     if r == 2
         && ({
             let n: &I = &c(4);
@@ -404,15 +411,14 @@ pub fn ispower_r<I: Int>(n: &I, r: u32) -> Option<I> {
             return None;
         }
     }
-    let x = introot(n, r)?;
-    if ipow(x.clone(), r) == *n {
+    let x = introot(n.borrow(), r)?;
+    if ipow::<I>(&x, r) == *n.borrow() {
         Some(x)
     } else {
         None
     }
 }
 
-/// Python `ispower(n)` mode using your `PrimeGen<T: PG>`.
 pub fn ispower<I: Int, J: PG>(n: &I) -> Option<(I, u32)> {
     if *n == I::zero() || *n == I::one() || *n == -I::one() {
         return Some((n.clone(), 1));
@@ -420,7 +426,7 @@ pub fn ispower<I: Int, J: PG>(n: &I) -> Option<(I, u32)> {
     // bit_length(|n|) TODO kinda hacky
     let two = c::<I>(2);
     let mut bits = 0usize;
-    let mut t = abs(n.clone());
+    let mut t = abs::<I>(n);
     while t > I::zero() {
         t = t.div_euclid(&two);
         bits += 1;
@@ -438,24 +444,24 @@ pub fn ispower<I: Int, J: PG>(n: &I) -> Option<(I, u32)> {
     None
 }
 
-/// Exact port of Python `jacobi(a, n)`.
 /// Returns None if n is even or n < 0; else Some(-1|0|1).
-pub fn jacobi<I: Int>(mut a: I, mut n: I) -> Option<i8> {
-    if is_even(&n) || is_neg(&n) {
+pub fn jacobi<I: Int>(a: impl Borrow<I>, n: impl Borrow<I>) -> Option<i8> {
+    let n = n.borrow();
+    if is_even::<I>(n) || is_neg::<I>(n) {
         return None;
     }
-    if is_zero(&a) {
+    if *n == <I>::zero() {
         return Some(0);
     }
-    if is_one(&a) {
+    if *n == <I>::one() {
         return Some(1);
     }
 
-    a = {
-        let a: &I = &a;
-        let n: &I = &n;
-        a.rem_euclid(n)
+    let mut a = {
+        // let a: &I = a.borrow();
+        a.borrow().rem_euclid(n.borrow())
     };
+
     let mut t: i8 = 1;
 
     let two = c::<I>(2);
@@ -464,9 +470,10 @@ pub fn jacobi<I: Int>(mut a: I, mut n: I) -> Option<i8> {
     let five = c::<I>(5);
     let eight = c::<I>(8);
 
-    while !is_zero(&a) {
-        while is_even(&a) {
-            a = a.div_euclid(&two);
+    let mut n = n.clone();
+    while !is_zero::<I>(&a) {
+        while is_even::<I>(&a) {
+            a = a.borrow().div_euclid(&two);
             let nm8 = {
                 let a: &I = &n;
                 let n: &I = &eight;
@@ -496,16 +503,16 @@ pub fn jacobi<I: Int>(mut a: I, mut n: I) -> Option<i8> {
             a.rem_euclid(n)
         };
     }
-    if is_one(&n) { Some(t) } else { Some(0) }
+    if is_one(n) { Some(t) } else { Some(0) }
 }
 
 pub const TB_DEFAULT: &[u32] = &[3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59];
 
-/// Faithful port of the given Python `isprime`.
-pub fn isprime<I: Int>(n: I, tb: Option<&[u32]>) -> bool {
-    let tb = tb.unwrap_or(TB_DEFAULT);
+pub fn isprime<I: Int>(n: impl Borrow<I>) -> bool {
+    let tb = TB_DEFAULT;
 
     // 1) trial division and small cases
+    let n = n.borrow().clone();
     if n.clone().rem_euclid(&c::<I>(2)) == I::zero() || n.clone() < c::<I>(3) {
         return n == c(2);
     }
@@ -522,11 +529,11 @@ pub fn isprime<I: Int>(n: I, tb: Option<&[u32]>) -> bool {
     let n_minus_1 = n.clone() - one.clone();
     let mut t = n_minus_1.clone().div_euclid(&two);
     let mut s = 1usize;
-    while is_even(&t) {
+    while is_even::<I>(&t) {
         t = t.div_euclid(&two);
         s += 1;
     }
-    let mut x = pow_mod(&c::<I>(2), &t, &n);
+    let mut x = pow_mod::<I>(&c::<I>(2), &t, &n);
     if x != one && x != n.clone() - one.clone() {
         let mut j = 1usize;
         while j < s {
@@ -551,7 +558,7 @@ pub fn isprime<I: Int>(n: I, tb: Option<&[u32]>) -> bool {
     // 3) select D for strong Lucas PRP
     let mut D = c::<I>(5);
     loop {
-        match jacobi(D.clone(), n.clone()) {
+        match jacobi::<I>(&D, &n) {
             Some(0) => return D == n,
             Some(-1) => break,
             Some(1) => {}
@@ -566,7 +573,7 @@ pub fn isprime<I: Int>(n: I, tb: Option<&[u32]>) -> bool {
             None => unreachable!(),
             _ => {}
         }
-        if D == -c::<I>(13) && ispower_r(&n, 2).is_some() {
+        if D == -c::<I>(13) && ispower_r::<I>(&n, 2).is_some() {
             return false;
         }
         D = -(D + c::<I>(2)); // revert
@@ -575,14 +582,14 @@ pub fn isprime<I: Int>(n: I, tb: Option<&[u32]>) -> bool {
 
     // run slprp(n, 1, (1 - D) // 4)
     let b = (I::one() - D.clone()).div_euclid(&c::<I>(4));
-    let g = gcd(n.clone(), b.clone());
+    let g = gcd::<I>(&n, &b);
     if g > I::one() && g < n {
         return false;
     }
 
     let mut s_l = 1usize;
     let mut t_l = (n.clone() + I::one()).div_euclid(&c::<I>(2));
-    while is_even(&t_l) {
+    while is_even::<I>(&t_l) {
         s_l += 1;
         t_l = t_l.div_euclid(&c::<I>(2));
     }
@@ -597,7 +604,7 @@ pub fn isprime<I: Int>(n: I, tb: Option<&[u32]>) -> bool {
         let mut v = Vec::new();
         let mut e = t_l.clone();
         while e > I::zero() {
-            v.push(is_odd(&e));
+            v.push(is_odd::<I>(&e));
             e = e.div_euclid(&c::<I>(2));
         }
         v.reverse();
@@ -679,7 +686,6 @@ pub fn isprime<I: Int>(n: I, tb: Option<&[u32]>) -> bool {
 mod tests_fac {
     use super::*;
 
-    // ---- jacobi ----
     #[test]
     fn jacobi_tables_15() {
         // Python:
@@ -687,7 +693,7 @@ mod tests_fac {
         let a_vals = [-10, -7, -4, -2, -1, 0, 1, 2, 4, 7, 10];
         let expect = [0, 1, -1, -1, -1, 0, 1, 1, 1, -1, 0];
         for (a, e) in a_vals.into_iter().zip(expect) {
-            assert_eq!(jacobi::<i128>(a.into(), 15i128), Some(e));
+            assert_eq!(jacobi::<i128>(&a, &15i128), Some(e));
         }
     }
 
@@ -697,7 +703,7 @@ mod tests_fac {
         let a_vals = [-10, -9, -4, -2, -1, 0, 1, 2, 4, 9, 10];
         let expect = [1, 1, 1, -1, 1, 0, 1, -1, 1, 1, 1];
         for (a, e) in a_vals.into_iter().zip(expect) {
-            assert_eq!(jacobi::<i128>(a.into(), 13i128), Some(e));
+            assert_eq!(jacobi::<i128>(&a, &13i128), Some(e));
         }
     }
 
@@ -707,28 +713,24 @@ mod tests_fac {
         let a_vals = [-10, -9, -4, -2, -1, 0, 1, 2, 4, 9, 10];
         let expect = [1, -1, -1, 1, -1, 0, 1, -1, 1, 1, -1];
         for (a, e) in a_vals.into_iter().zip(expect) {
-            assert_eq!(jacobi::<i128>(a.into(), 11i128), Some(e));
+            assert_eq!(jacobi::<i128>(&a, &11i128), Some(e));
         }
     }
 
     #[test]
     fn jacobi_none_for_bad_n() {
-        assert!(jacobi::<i128>(3.into(), 10i128).is_none()); // n even
-        assert!(jacobi::<i128>(3.into(), -11i128).is_none()); // n < 0
+        assert!(jacobi::<i128>(&3, &10i128).is_none()); // n even
+        assert!(jacobi::<i128>(&3, &-11i128).is_none()); // n < 0
     }
-
-    // ---- introot ----
 
     #[test]
     fn introot_examples() {
-        assert_eq!(introot::<i128>(&(-729).into(), 3), Some((-9).into()));
-        assert_eq!(introot::<i128>(&(-728).into(), 3), Some((-8).into()));
-        assert_eq!(introot::<i128>(&1023i128, 2), Some(31i128));
-        assert_eq!(introot::<i128>(&1024i128, 2), Some(32i128));
-        assert_eq!(introot::<i128>(&(-8).into(), 2), None); // even r, negative n
+        assert_eq!(introot::<i128>(-729, 3), Some(-9));
+        assert_eq!(introot::<i128>(-728, 3), Some(-8));
+        assert_eq!(introot::<i128>(1023i128, 2), Some(31i128));
+        assert_eq!(introot::<i128>(1024i128, 2), Some(32i128));
+        assert_eq!(introot::<i128>(-8, 2), None); // even r, negative n
     }
-
-    // ---- ispower ----
 
     #[test]
     fn ispower_auto_examples() {
@@ -745,62 +747,53 @@ mod tests_fac {
     fn ispower_r_examples_for_64() {
         // Python: [ispower(64,r) for r in range(7)] -> [(8,2), 64, 8, 4, None, None, 2]
         // We test the r>0 slots.
-        assert_eq!(ispower_r::<i128>(&64i128, 1), Some(64i128)); // matches Python branch r==1
-        assert_eq!(ispower_r::<i128>(&64i128, 2), Some(8i128));
-        assert_eq!(ispower_r::<i128>(&64i128, 3), Some(4i128));
-        assert_eq!(ispower_r::<i128>(&64i128, 4), None);
-        assert_eq!(ispower_r::<i128>(&64i128, 5), None);
-        assert_eq!(ispower_r::<i128>(&64i128, 6), Some(2i128));
+        assert_eq!(ispower_r::<i128>(64i128, 1), Some(64i128)); // matches Python branch r==1
+        assert_eq!(ispower_r::<i128>(64i128, 2), Some(8i128));
+        assert_eq!(ispower_r::<i128>(64i128, 3), Some(4i128));
+        assert_eq!(ispower_r::<i128>(64i128, 4), None);
+        assert_eq!(ispower_r::<i128>(64i128, 5), None);
+        assert_eq!(ispower_r::<i128>(64i128, 6), Some(2i128));
     }
 
     #[test]
     fn ispower_residue_shortcuts() {
         // r=2 shortcut: n % 4 == 2 can never be square
-        assert_eq!(ispower_r::<i128>(&6i128, 2), None);
+        assert_eq!(ispower_r::<i128>(6i128, 2), None);
         // r=3 shortcut: n % 7 in {2,4,6} can never be cube
         for &n in &[2i128, 4, 6] {
-            assert_eq!(ispower_r::<i128>(&n, 3), None);
+            assert_eq!(ispower_r::<i128>(n, 3), None);
         }
     }
-
-    // ---- gcd ----
 
     #[test]
     fn gcd_examples() {
         // (24,42,78,93) -> 3
-        let g1 = gcd::<i128>(24.into(), 42.into());
-        let g2 = gcd::<i128>(g1, 78.into());
-        let g3 = gcd::<i128>(g2, 93.into());
+        let g1 = gcd::<i128>(24, 42);
+        let g2 = gcd::<i128>(g1, 78);
+        let g3 = gcd::<i128>(g2, 93);
         assert_eq!(g3, 3);
 
         // gcd(117, -17883411) = 39
-        assert_eq!(gcd::<i128>(117.into(), -17883411i128), 39);
+        assert_eq!(gcd::<i128>(117, -17883411i128), 39);
 
         // gcd(3549, 70161, 336882, 702702) -> 273 (chain)
-        let g1 = gcd::<i128>(3549.into(), 70161.into());
-        let g2 = gcd::<i128>(g1, 336_882.into());
-        let g3 = gcd::<i128>(g2, 702_702.into());
+        let g1 = gcd::<i128>(3549, 70161);
+        let g2 = gcd::<i128>(g1, 336_882);
+        let g3 = gcd::<i128>(g2, 702_702);
         assert_eq!(g3, 273);
     }
 
-    // ---- modinv ----
-
     #[test]
     fn modinv_examples() {
-        assert_eq!(
-            modinv::<i128>(&235.into(), &235227.into()),
-            Some(147142.into())
-        );
-        assert_eq!(modinv::<i128>(&1.into(), &1.into()), Some(0.into()));
-        assert_eq!(modinv::<i128>(&2.into(), &5.into()), Some(3.into()));
-        assert_eq!(modinv::<i128>(&5.into(), &8.into()), Some(5.into()));
-        assert_eq!(modinv::<i128>(&37.into(), &100.into()), Some(73.into()));
-        assert_eq!(modinv::<i128>(&6.into(), &8.into()), None);
-        assert_eq!(modinv::<i128>(&3.into(), &0.into()), None);
-        assert_eq!(modinv::<i128>(&3.into(), &-7i128), None);
+        assert_eq!(modinv::<i128>(235, 235227), Some(147142));
+        assert_eq!(modinv::<i128>(1, 1), Some(0));
+        assert_eq!(modinv::<i128>(2, 5), Some(3));
+        assert_eq!(modinv::<i128>(5, 8), Some(5));
+        assert_eq!(modinv::<i128>(37, &100), Some(73));
+        assert_eq!(modinv::<i128>(&6, 8), None);
+        assert_eq!(modinv::<i128>(&3, &0), None);
+        assert_eq!(modinv::<i128>(3, -7i128), None);
     }
-
-    // ---- isprime ----
 
     #[test]
     fn isprime_doc_list() {
@@ -808,7 +801,7 @@ mod tests_fac {
         let mut got = Vec::<i32>::new();
         for n in 0..91 {
             let x = 1000i128 * n as i128 + 1;
-            if isprime::<i128>(x, None) {
+            if isprime::<i128>(x) {
                 got.push(n);
             }
         }
@@ -821,15 +814,15 @@ mod tests_fac {
     #[test]
     fn isprime_basic_and_carmichael() {
         // smalls
-        assert!(isprime::<i128>(2.into(), None));
-        assert!(isprime::<i128>(3.into(), None));
-        assert!(!isprime::<i128>(1.into(), None));
-        assert!(!isprime::<i128>(9.into(), None));
-        assert!(!isprime::<i128>(100.into(), None));
-        assert!(isprime::<i128>(59.into(), None)); // in TB_DEFAULT
+        assert!(isprime::<i128>(2));
+        assert!(isprime::<i128>(3));
+        assert!(!isprime::<i128>(1));
+        assert!(!isprime::<i128>(9));
+        assert!(!isprime::<i128>(100));
+        assert!(isprime::<i128>(59)); // in TB_DEFAULT
         // composites including Carmichael numbers
         for &n in &[561i128, 1105, 1729, 2465, 2821, 6601] {
-            assert!(!isprime::<i128>(n, None));
+            assert!(!isprime::<i128>(n));
         }
         // a few primes around SPRP/Lucas edges
         for &p in &[
@@ -837,7 +830,7 @@ mod tests_fac {
             2_147_483_629i128,
             9_007_199_254_740_881i128,
         ] {
-            assert!(isprime::<i128>(p, None));
+            assert!(isprime::<i128>(p));
         }
     }
 
@@ -846,8 +839,8 @@ mod tests_fac {
         // divisible by a trial basis prime
         for &p in TB_DEFAULT {
             let n = (p as i128) * 101i128;
-            assert!(!isprime::<i128>(n, None));
-            assert!(isprime::<i128>(p as i128, None));
+            assert!(!isprime::<i128>(n));
+            assert!(isprime::<i128>(p as i128));
         }
     }
 }
