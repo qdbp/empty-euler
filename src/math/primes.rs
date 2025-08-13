@@ -24,7 +24,7 @@ struct PrimeGenSieve<T: PG> {
     pl: Vec<u32>,
     // we persist per-prime indices to only do the modulo computation
     // once per prime
-    ks: Vec<u32>,
+    ks: Vec<usize>,
     pg: Box<PrimeGen<T>>,
     ll: T,
     n: T,
@@ -43,7 +43,7 @@ impl<T: PG> PrimeGenSieve<T> {
         // we don't know the segment end, but do know the segment start
         let ll0 = n0.clone() * n0.clone();
 
-        let ks0: Vec<u32> = BASE_PRIMES
+        let ks0: Vec<usize> = BASE_PRIMES
             .iter()
             .map(|&p| Self::compute_init_k(p.into(), ll0.clone()))
             .collect();
@@ -64,12 +64,12 @@ impl<T: PG> PrimeGenSieve<T> {
         dummy
     }
 
-    fn compute_init_k(p: T, ll: T) -> u32 {
+    fn compute_init_k(p: T, ll: T) -> usize {
         let p_u32: u32 = p.clone().try_into().ok().unwrap();
-        let mut k = (p_u32 - (ll % p).try_into().ok().unwrap()) % p_u32;
+        let mut k: usize = ((p_u32 - (ll % p).try_into().ok().unwrap()) % p_u32) as usize;
         // if we have an odd naive index that means our starting point was even
         // so we go to the next one. look ma, no branches!
-        k += (k % 2) * p_u32;
+        k += (k % 2) * (p_u32 as usize);
         k / 2
     }
 
@@ -79,8 +79,8 @@ impl<T: PG> PrimeGenSieve<T> {
         self.nn = self.n.clone() * self.n.clone();
 
         // unlike in the original primegen we do implement the compression by 2
-        let sl_u32 = (self.nn.clone() - self.ll.clone()).try_into().ok().unwrap() / 2;
-        self.sieve_vec = FixedBitSet::with_capacity(sl_u32 as usize);
+        let sl_usize = ((self.nn.clone() - self.ll.clone()).try_into().ok().unwrap() / 2) as usize;
+        self.sieve_vec = FixedBitSet::with_capacity(sl_usize);
 
         // do the sieving! differences from labmmath: 1 = composite, we've culled events
         // TODO wheel30 this mofo
@@ -89,13 +89,13 @@ impl<T: PG> PrimeGenSieve<T> {
         for i in 0..self.ks.len() {
             let mut k = self.ks[i];
             let p_u32: u32 = self.pl[i];
-            while k < sl_u32 {
-                let w = (k as usize) / word_bits;
-                let b = (k as usize) % word_bits;
+            while k < sl_usize {
+                let w = k / word_bits;
+                let b = k % word_bits;
                 unsafe {
                     *bits.get_unchecked_mut(w) |= 1usize << b;
                 }
-                k += p_u32;
+                k += p_u32 as usize;
             }
             self.ks[i] = k; // store the next index for this prime
         }
@@ -116,7 +116,7 @@ impl<T: PG> PrimeGenSieve<T> {
     }
 
     fn finalize_segment(&mut self) {
-        let sl_usize = (self.nn.clone() - self.ll.clone()).try_into().ok().unwrap() / 2;
+        let sl_usize = ((self.nn.clone() - self.ll.clone()).try_into().ok().unwrap() / 2) as usize;
         // adjust our prime indices to be valid for the next segment
         for i in 0..self.ks.len() {
             self.ks[i] -= sl_usize;
