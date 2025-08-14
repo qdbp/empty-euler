@@ -22,7 +22,7 @@ pub fn dispatch(id: &str, args: &[String]) -> Result<String> {
 
 #[macro_export]
 macro_rules! soln {
-    (  $( $name:ident : $ty:ty $( = $def:expr )? ),* => $(,)? { $($body:tt)* } ) => {
+    (  $( $name:ident : $ty:ty $( = $def:expr )? ),* $(,)? => { $($body:tt)* } ) => {
 
         use ::clap::Parser;
         #[derive(::clap::Parser, ::std::fmt::Debug)]
@@ -34,12 +34,18 @@ macro_rules! soln {
             )*
         }
 
-        #[allow(non_snake_case)]
+        #[allow(non_snake_case, unused)]
         pub fn solve_raw( $( $name : $ty ),* ) -> ::std::string::String {
             $($body)*
+
+            // this silences the annoying warning in a new solution that made us
+            // do "foo".to_string() and similar
+            #[allow(unreachable_code)]
+            return "unsolved!".to_string()
         }
 
         pub fn solve(argv: &[::std::string::String]) -> ::anyhow::Result<::std::string::String> {
+            #[allow(unused)]
             let parsed = SolnArgs::parse_from(argv);
             // do some magic logging
             let __problem: &str = {
