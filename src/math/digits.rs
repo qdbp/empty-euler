@@ -1,6 +1,15 @@
 use num_traits::{Euclid, Zero};
 use std::ops::{self, Deref};
 
+/// Struct to store and manipulate the expansion of a given number in some base.
+///
+/// The hint tells Digits how much to pre-allocate. This can be very important
+/// for heavy loops in the trillion-plus range. It's not a hard cap and Digits
+/// can expand as needed.
+///
+/// Note that digits does not do leading zero canonicalization by default.
+/// Any number of leading zeroes will map back to the same num, so if leading
+/// zeros must be forbidden the caller should check msb.
 #[derive(Debug, Clone)]
 pub struct Digits<const B: u32, const HINT: usize = 8> {
     pub digs: Vec<u32>,
@@ -10,7 +19,7 @@ impl<const B: u32, const HINT: usize, T> From<&T> for Digits<B, HINT>
 where
     T: Zero + From<u32> + Euclid + TryInto<u32> + Clone,
 {
-    // note: internall digits are little-endian -- the least significant digit is
+    // note: internally digits are little-endian -- the least significant digit is
     // is at index 0, etc.
     fn from(n: &T) -> Self {
         debug_assert!(B >= 2);
@@ -44,40 +53,33 @@ impl<const B: u32, const HINT: usize> Digits<B, HINT> {
         Self { digs: digits }
     }
 
-    /// Reconstructs the number from the digits in the given base
+    /// Reconstructs the concrete number
+    #[inline(always)]
     pub fn into_num<T>(&self) -> T
     where
         T: Zero + From<u32>,
-        for<'a> T: ops::AddAssign<&'a T>,
-        for<'a> T: ops::MulAssign<&'a T>,
+        for<'a> T: ops::AddAssign<&'a T> + ops::MulAssign<&'a T>,
     {
-        let mut n = T::zero();
-        let base = T::from(B);
-        for &d in self.digs.iter().rev() {
-            n *= &base;
-            let tmp: T = d.into();
-            n += &tmp;
-        }
-        n
+        self.into_num_slice::<T>(0, self.len())
     }
 
-    /// Reconstructes a sub-run of the digits as a number
+    /// Reconstructs a sub-run of the digits as a number
     pub fn into_num_slice<T>(&self, start: usize, end: usize) -> T
     where
         T: Zero + From<u32>,
         for<'a> T: ops::AddAssign<&'a T>,
-        for<'a> T: ops::MulAssign<&'a T>,
+        for<'a> T: ops::AddAssign<&'a T> + ops::MulAssign<&'a T>,
     {
         let mut n = T::zero();
         let base = T::from(B);
-        for &d in self.digs.iter().rev().skip(start).take(end - start) {
+        for &d in self.iter_from_msd().skip(start).take(end - start) {
             n *= &base;
-            let tmp: T = d.into();
-            n += &tmp;
+            n += &d.into();
         }
         n
     }
 
+    /// Big endian convention -- the 0th digit is the most significant digit (MSD).
     pub fn nth_digit(&self, n: usize) -> Option<u32> {
         if n < self.digs.len() {
             Some(self.digs[self.digs.len() - 1 - n])
@@ -86,16 +88,31 @@ impl<const B: u32, const HINT: usize> Digits<B, HINT> {
         }
     }
 
+    #[inline(always)]
+    pub fn iter_from_msd(&self) -> impl Iterator<Item = &u32> {
+        self.iter().rev()
+    }
+
+    #[inline(always)]
+    pub fn iter_from_lsd(&self) -> impl Iterator<Item = &u32> {
+        self.iter()
+    }
+
     /// Most significant digit (MSD) of the number represented by the digits.
     pub fn msd(&self) -> u32 {
-        if let Some(&d) = self.digs.last() {
-            d
-        } else {
-            0
+        self.nth_digit(0).unwrap_or(0)
+    }
+
+    /// Strips any leading zeroes from the digits
+    pub fn to_canonical(&self) -> Self {
+        match self.iter_from_lsd().position(|&d| d == 0) {
+            Some(first_nonzero) => Self::new_le(self[..first_nonzero].to_vec()),
+            None => Self::new_le(vec![0]),
         }
     }
 }
 
+/// We can treat digits as a little endian view to delegate basics like e.g. len
 impl<const B: u32, const HINT: usize> Deref for Digits<B, HINT> {
     type Target = [u32];
     fn deref(&self) -> &Self::Target {
@@ -133,5 +150,17 @@ mod tests {
         let d: Digits<2> = Digits::from(&0b01101u32);
         assert_eq!(d.into_num_slice::<u64>(0, 8), 0b1101);
         assert_eq!(d.into_num_slice::<u64>(1, 3), 0b10);
+    }
+
+    #[test]
+    fn test_to_canonical() {
+        let d = Digits::<10>::new_be([0, 0, 0, 1, 2]);
+        assert_eq!(d.digs, &[2, 1, 0, 0, 0]);
+        assert_eq!(d.into_num::<u32>(), 12);
+        assert_eq!(d.msd(), 0);
+        let dc = d.to_canonical();
+        assert_eq!(dc.digs, &[2, 1]);
+        assert_eq!(dc.into_num::<u32>(), 12);
+        assert_eq!(dc.msd(), 1);
     }
 }

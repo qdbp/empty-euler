@@ -25,6 +25,6 @@ fn main() -> anyhow::Result<()> {
     let with_name: Vec<String> = std::iter::once(cli.id.clone())
         .chain(cli.args.iter().cloned())
         .collect();
-    println!("{}", pe::infra::dispatch(&cli.id, &with_name)?);
+    println!("{}", pe_lib::infra::dispatch(&cli.id, &with_name)?);
     Ok(())
 }

@@ -90,7 +90,7 @@ impl<T: PG> PrimeGenSieve<T> {
             let mut k = self.ks[i];
             let p_u32: u32 = self.pl[i];
             while k < sl_usize {
-                let w = k / word_bits;
+                let w = (k as usize) / word_bits;
                 let b = k % word_bits;
                 unsafe {
                     *bits.get_unchecked_mut(w) |= 1usize << b;

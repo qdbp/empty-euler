@@ -71,12 +71,12 @@ macro_rules! soln {
 
 #[macro_export]
 macro_rules! examples {
-    ( $( | $( $it:tt ),* $(,)? | => $val:tt ;)+) => {
+    ( $( $( $it:expr ),* $(,)? => $val:tt ;)+) => {
         #[cfg(test)]
-        mod tests {
+        mod examples_tests {
             use super::*;
             #[test]
-            fn test_examples() { $( assert_eq!(solve_raw($($it, )*), $val) ;)* }
+            fn test_examples() { $( assert_eq!(solve_raw($( ( $it ), )*), $val) ;)* }
         }
     };
 }
