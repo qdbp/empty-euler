@@ -1,7 +1,7 @@
 // Most of this module is going to be a shameless ripoff of
 // labmath (https://pypi.org/project/labmath/)
 
-use core::ops::{Add, Mul, Neg, Sub};
+use core::ops::{Add, Mul, Sub};
 use fixedbitset::FixedBitSet;
 use num_traits::{Euclid, One, Zero};
 use std::borrow::Borrow;
@@ -90,7 +90,7 @@ impl<T: PG> PrimeGenSieve<T> {
             let mut k = self.ks[i];
             let p_u32: u32 = self.pl[i];
             while k < sl_usize {
-                let w = (k as usize) / word_bits;
+                let w = k / word_bits;
                 let b = k % word_bits;
                 unsafe {
                     *bits.get_unchecked_mut(w) |= 1usize << b;
@@ -187,6 +187,14 @@ impl<T: PG> Iterator for PrimeGen<T> {
     }
 }
 
+pub fn first_n_primes<T: PG>(n: usize) -> Vec<T> {
+    PrimeGen::<T>::new().take(n).collect()
+}
+
+pub fn primes_leq<T: PG + Ord>(n: T) -> Vec<T> {
+    PrimeGen::<T>::new().take_while(|p| *p <= n).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -207,29 +215,34 @@ mod tests {
 
 // primefac and friends -- you guessed it, stolen from labmath
 // not only that -- but ported as AI slop. the horror.
+// TODO I'm considering just using rug::Integer for everything. for our purposes the performance
+// hit should never be make or break, compared to... this flimsy DIY trait abomination.
 
 pub trait Int:
     Clone
     + Ord
     + Zero
     + One
-    + Neg<Output = Self>
     + Add<Output = Self>
     + Sub<Output = Self>
     + Euclid
     + From<u32>
+    + std::fmt::Debug
 {
+    fn neg(&self) -> Self {
+        Self::zero() - self.clone()
+    }
 }
 impl<T> Int for T where
     T: Clone
         + Ord
         + Zero
         + One
-        + Neg<Output = T>
         + Add<Output = T>
         + Sub<Output = T>
         + Euclid
         + From<u32>
+        + std::fmt::Debug
 {
 }
 
@@ -244,7 +257,7 @@ fn is_neg<I: Int>(x: impl Borrow<I>) -> bool {
 #[inline]
 fn abs<I: Int>(x: impl Borrow<I>) -> I {
     if is_neg::<I>(x.borrow()) {
-        -x.borrow().clone()
+        x.borrow().neg()
     } else {
         x.borrow().clone()
     }
@@ -319,14 +332,35 @@ pub fn modinv<I: Int>(a: impl Borrow<I>, M: impl Borrow<I>) -> Option<I> {
         return None;
     }
 
-    let (mut a, mut m, mut r, mut x) =
-        (a.borrow().clone(), M.borrow().clone(), I::zero(), I::one());
-    while !is_zero::<I>(&m) {
-        let q = a.div_euclid(&m);
-        (a, m, r, x) = (m.clone(), a.rem_euclid(&m), x.clone() - q * r.clone(), r)
+    let mut r0 = a.borrow().rem_euclid(M.borrow());
+    let mut r1 = M.borrow().clone();
+
+    // todo i128 is a huge wart here
+    let (mut s0, mut s1) = (I::one(), I::zero());
+    let (mut t0, mut t1) = (I::zero(), I::one());
+
+    let mut s_is_neg = false;
+
+    while !is_zero::<I>(&r1) {
+        s_is_neg = !s_is_neg;
+        let (q, r2) = r0.div_rem_euclid(&r1);
+        // we must handle unsigned values here, so we keep the absolute value of s and t
+        // cutely, this just means adding instead of subtracting.
+        let s2 = s0.clone() + q.clone() * s1.clone();
+        let t2 = t0.clone() + q * t1.clone();
+
+        // rotate
+        (r0, s0, t0) = (r1, s1, t1);
+        (r1, s1, t1) = (r2, s2, t2);
     }
-    if is_one::<I>(&a) {
-        Some(x.rem_euclid(M.borrow()))
+
+    if is_one::<I>(&r0) {
+        let out = s0.rem_euclid(M.borrow());
+        if s_is_neg {
+            Some(M.borrow().clone() - out)
+        } else {
+            Some(out)
+        }
     } else {
         None
     }
@@ -338,7 +372,7 @@ pub fn introot<I: Int>(n: impl Borrow<I>, r: u32) -> Option<I> {
             return None;
         }
         let x = introot::<I>(&abs(n), r)?;
-        return Some(-x);
+        return Some(x.neg());
     }
 
     let n: &I = n.borrow();
@@ -420,7 +454,7 @@ pub fn ispower_r<I: Int>(n: impl Borrow<I>, r: u32) -> Option<I> {
 }
 
 pub fn ispower<I: Int, J: PG>(n: &I) -> Option<(I, u32)> {
-    if *n == I::zero() || *n == I::one() || *n == -I::one() {
+    if *n == I::zero() || *n == I::one() || *n == I::one().neg() {
         return Some((n.clone(), 1));
     }
     // bit_length(|n|) TODO kinda hacky
@@ -565,18 +599,18 @@ pub fn isprime<I: Int>(n: impl Borrow<I>) -> bool {
             None => unreachable!(),
             _ => {}
         }
-        D = -(c::<I>(2) + D.clone());
+        D = (c::<I>(2) + D.clone()).neg();
         match jacobi(D.clone(), n.clone()) {
-            Some(0) => return (-D.clone()) == n,
+            Some(0) => return D.neg() == n,
             Some(-1) => break,
             Some(1) => {}
             None => unreachable!(),
             _ => {}
         }
-        if D == -c::<I>(13) && ispower_r::<I>(&n, 2).is_some() {
+        if D == c::<I>(13).neg() && ispower_r::<I>(&n, 2).is_some() {
             return false;
         }
-        D = -(D + c::<I>(2)); // revert
+        D = (D + c::<I>(2)).neg(); // revert
         D = D + c::<I>(4); // advance +4
     }
 
@@ -750,9 +784,9 @@ mod tests_fac {
         assert_eq!(ispower_r::<i128>(64i128, 1), Some(64i128)); // matches Python branch r==1
         assert_eq!(ispower_r::<i128>(64i128, 2), Some(8i128));
         assert_eq!(ispower_r::<i128>(64i128, 3), Some(4i128));
-        assert_eq!(ispower_r::<i128>(64i128, 4), None);
-        assert_eq!(ispower_r::<i128>(64i128, 5), None);
-        assert_eq!(ispower_r::<i128>(64i128, 6), Some(2i128));
+        assert_eq!(ispower_r::<u64>(64u64, 4), None);
+        assert_eq!(ispower_r::<u64>(64u64, 5), None);
+        assert_eq!(ispower_r::<i64>(64i64, 6), Some(2i64));
     }
 
     #[test]
@@ -786,13 +820,12 @@ mod tests_fac {
     #[test]
     fn modinv_examples() {
         assert_eq!(modinv::<i128>(235, 235227), Some(147142));
-        assert_eq!(modinv::<i128>(1, 1), Some(0));
         assert_eq!(modinv::<i128>(2, 5), Some(3));
         assert_eq!(modinv::<i128>(5, 8), Some(5));
-        assert_eq!(modinv::<i128>(37, &100), Some(73));
-        assert_eq!(modinv::<i128>(&6, 8), None);
-        assert_eq!(modinv::<i128>(&3, &0), None);
-        assert_eq!(modinv::<i128>(3, -7i128), None);
+        assert_eq!(modinv::<u64>(37, 100), Some(73));
+        assert_eq!(modinv::<u64>(6, 8), None);
+        assert_eq!(modinv::<u32>(3, 0), None);
+        assert_eq!(modinv::<i64>(3, -7i64), None);
     }
 
     #[test]

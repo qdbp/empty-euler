@@ -1,7 +1,7 @@
 use std::hint::black_box;
 
 use criterion::{Criterion, criterion_group, criterion_main};
-use pe::math::primes::PrimeGen;
+use pe_lib::math::primes::PrimeGen;
 
 fn bench_first_10m_primes(c: &mut Criterion) {
     c.bench_function("first_10m_primes_usize_collect", |b| {
