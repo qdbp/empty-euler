@@ -1,3 +1,6 @@
+use num_traits::{One, Zero};
+use std::fmt;
+use std::ops::AddAssign;
 /// Modular integer type ℤ/Nℤ
 /// We try to be generic and follow num_traits
 /// For now we hardcode u64 backing store
@@ -8,21 +11,46 @@ use std::{
     ops::{Add, Div, Mul, Neg, Rem, Sub},
 };
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+use crate::int::{UnsignedInt, modinv_u};
+
+/// Modular integer type ℤ/Nℤ. There is no requirement that N be prime,
+///
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(transparent)]
 pub struct Z<const N: u64>(pub u64);
 
 impl<const N: u64> Z<N> {
+    // TODO allow bigint moduli, can get nasty slow?
     const WIDE: bool = N > u32::MAX as u64;
 }
 
-impl<const N: u64> Add for Z<N> {
-    type Output = Self;
-    fn add(self, rhs: Self) -> Self {
-        let (s, carry) = self.0.overflowing_add(rhs.0);
+impl<const N: u64> Default for Z<N> {
+    fn default() -> Self {
+        Self::zero()
+    }
+}
+
+impl<const N: u64, Rhs> AddAssign<Rhs> for Z<N>
+where
+    Rhs: Borrow<Z<N>>,
+{
+    fn add_assign(&mut self, rhs: Rhs) {
+        let (s, carry) = self.0.overflowing_add(rhs.borrow().0);
         let ge = (s >= N) as u64 | (carry as u64);
         // subtract m iff ge == 1
-        Self(s.wrapping_sub(N & 0u64.wrapping_sub(ge)))
+        self.0 = s.wrapping_sub(N & 0u64.wrapping_sub(ge))
+    }
+}
+
+impl<const N: u64, Rhs> Add<Rhs> for Z<N>
+where
+    Rhs: Borrow<Z<N>>,
+{
+    type Output = Self;
+    fn add(self, rhs: Rhs) -> Self {
+        let mut out = self;
+        out += rhs;
+        out
     }
 }
 
@@ -33,14 +61,17 @@ impl<const N: u64> Sub for Z<N> {
     }
 }
 
-impl<const N: u64> Mul for Z<N> {
+impl<const N: u64, Rhs> Mul<Rhs> for Z<N>
+where
+    Rhs: Borrow<Z<N>>,
+{
     type Output = Self;
-    fn mul(self, rhs: Self) -> Self {
+    fn mul(self, rhs: Rhs) -> Self {
         // if we fit into u32 we can never overflow u64
         if !Self::WIDE {
-            Z::<N>((self.0 * rhs.0) % N)
+            Z::<N>((self.0 * rhs.borrow().0) % N)
         } else {
-            Z::<N>(((self.0 as u128 * rhs.0 as u128) % (N as u128)) as u64)
+            Z::<N>(((self.0 as u128 * rhs.borrow().0 as u128) % (N as u128)) as u64)
         }
     }
 }
@@ -72,30 +103,21 @@ impl<const N: u64> Ord for Z<N> {
     }
 }
 
-impl<const N: u64> Borrow<u64> for Z<N> {
+impl<const N: u64, Rhs: UnsignedInt + From<u64> + TryInto<u64>> From<Rhs> for Z<N> {
     #[inline]
-    fn borrow(&self) -> &u64 {
-        &self.0
-    }
-}
-
-impl<const N: u64> From<u32> for Z<N> {
-    #[inline]
-    fn from(x: u32) -> Self {
-        Self((x as u64) % N)
+    fn from(x: Rhs) -> Self {
+        // SAFETY: rem_euclid with N should always give an in-range value
+        let r = x.rem_euclid(&N.into()).try_into().ok().unwrap();
+        Self(r)
     }
 }
 
 impl<const N: u64> Div for Z<N> {
     type Output = Self;
     fn div(self, rhs: Self) -> Self {
-        Z::<N>((self.0 * modinv(rhs.0, N).expect("No modular inverse")) % N)
+        Z::<N>((self.0 * modinv_u(rhs.0, N).expect("No modular inverse")) % N)
     }
 }
-use num_traits::{One, Zero};
-use std::fmt;
-
-use crate::primes::modinv;
 
 impl<const N: u64> Zero for Z<N> {
     fn zero() -> Self {
