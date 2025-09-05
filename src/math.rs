@@ -4,4 +4,5 @@ pub mod digits;
 pub mod int;
 pub mod lp;
 pub mod modular;
+pub mod poly;
 pub mod primes;

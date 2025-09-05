@@ -29,6 +29,7 @@ where
     acc
 }
 
+#[cfg(test)]
 mod tests {
     use crate::modular::Z;
 
