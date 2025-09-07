@@ -36,8 +36,7 @@ macro_rules! soln {
 
         #[allow(non_snake_case, unused)]
         pub fn solve_raw( $( $name : $ty ),* ) -> ::std::string::String {
-            $($body)*
-
+            $($body)* ;
             // this silences the annoying warning in a new solution that made us
             // do "foo".to_string() and similar
             #[allow(unreachable_code)]
@@ -73,10 +72,10 @@ macro_rules! soln {
 macro_rules! examples {
     ( $( $( $it:expr ),* $(,)? => $val:tt ;)+) => {
         #[cfg(test)]
-        mod examples_tests {
+        mod examples {
             use super::*;
             #[test]
-            fn test_examples() { $( assert_eq!(solve_raw($( ( $it ), )*), $val) ;)* }
+            fn test() { $( assert_eq!(solve_raw($( ( $it ), )*), $val) ;)* }
         }
     };
 }
