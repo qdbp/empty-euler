@@ -11,7 +11,7 @@ use std::{
     ops::{Add, Div, Mul, Neg, Rem, Sub},
 };
 
-use crate::int::{UnsignedInt, modinv_u};
+use crate::int::{BaseInt, modinv_u};
 
 /// Modular integer type ℤ/Nℤ. There is no requirement that N be prime,
 ///
@@ -103,7 +103,7 @@ impl<const N: u64> Ord for Z<N> {
     }
 }
 
-impl<const N: u64, Rhs: UnsignedInt + From<u64> + TryInto<u64>> From<Rhs> for Z<N> {
+impl<const N: u64, Rhs: BaseInt + From<u64> + TryInto<u64>> From<Rhs> for Z<N> {
     #[inline]
     fn from(x: Rhs) -> Self {
         // SAFETY: rem_euclid with N should always give an in-range value

@@ -272,6 +272,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "48c757948c5ede0e46177b7add2e67155f70e33c07fea8284df6576da70b3719"
 
 [[package]]
+name = "facto"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c213215b6f1e5472f0eb254014116f59041de45b45c79031541d8fbcc55a98df"
+dependencies = [
+ "num-integer",
+ "num-traits",
+ "redc",
+ "rug",
+ "twoword",
+]
+
+[[package]]
 name = "fixedbitset"
 version = "0.5.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -452,6 +465,7 @@ dependencies = [
  "anyhow",
  "clap",
  "criterion",
+ "facto",
  "fixedbitset",
  "gmp-mpfr-sys",
  "good_lp",
@@ -596,6 +610,17 @@ checksum = "22e18b0f0062d30d4230b2e85ff77fdfe4326feb054b9783a3460d8435c8ab91"
 dependencies = [
  "crossbeam-deque",
  "crossbeam-utils",
+]
+
+[[package]]
+name = "redc"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ca759e9a6bdf10b98231a5d0f3218635640c7a9da995ee0a5b67c1e102eded1c"
+dependencies = [
+ "num-traits",
+ "rug",
+ "twoword",
 ]
 
 [[package]]
@@ -806,6 +831,15 @@ dependencies = [
  "thread_local",
  "tracing-core",
  "tracing-log",
+]
+
+[[package]]
+name = "twoword"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f996a4abc0d489d08b5761c6e08cb2a226364b531bdcd8e4286bbc747d1e345c"
+dependencies = [
+ "num-traits",
 ]
 
 [[package]]

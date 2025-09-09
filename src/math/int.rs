@@ -1,13 +1,14 @@
 // note: not num, we don't require div or mul here
 use core::ops::{Add, Sub};
+use facto::Factoring;
 use num_traits::{Euclid, One, Signed, Unsigned, Zero};
-use std::{borrow::Borrow, ops::Mul};
+use std::{borrow::Borrow, collections::HashMap, ops::Mul};
 
 use crate::{
     algo::expsq,
     primes::{PG, PrimeGen},
 };
-pub trait UnsignedInt:
+pub trait BaseInt:
     Clone
     + Ord
     + Zero
@@ -21,7 +22,7 @@ pub trait UnsignedInt:
     + std::fmt::Debug
 {
 }
-impl<T> UnsignedInt for T where
+impl<T> BaseInt for T where
     T: Clone
         + Ord
         + Zero
@@ -34,8 +35,8 @@ impl<T> UnsignedInt for T where
 {
 }
 
-pub trait Int: UnsignedInt + Signed + From<i32> {}
-impl<T> Int for T where T: UnsignedInt + Signed + From<i32> {}
+pub trait Int: BaseInt + Signed + From<i32> {}
+impl<T> Int for T where T: BaseInt + Signed + From<i32> {}
 
 pub trait SignedClosure
 where
@@ -95,7 +96,7 @@ fn is_odd<I: Int>(x: impl Borrow<I>) -> bool {
     !is_even(x)
 }
 
-fn ipow<I: Int>(base: impl Borrow<I>, exp: u32) -> I {
+fn ipow<I: BaseInt>(base: impl Borrow<I>, exp: u32) -> I {
     expsq::<I, u32>(base, &exp)
 }
 
@@ -131,7 +132,7 @@ pub fn gcd<I: Int>(a: impl Borrow<I>, b: impl Borrow<I>) -> I {
     abs(&a)
 }
 
-pub fn modinv_u<I: UnsignedInt + SignedClosure>(a: impl Borrow<I>, M: impl Borrow<I>) -> Option<I> {
+pub fn modinv_u<I: BaseInt + SignedClosure>(a: impl Borrow<I>, M: impl Borrow<I>) -> Option<I> {
     let a_signed: I::Signed = a.borrow().to_signed();
     let M_signed: I::Signed = M.borrow().to_signed();
     modinv(a_signed, M_signed).map(|x| {
@@ -329,7 +330,7 @@ pub fn jacobi<I: Int>(a: impl Borrow<I>, n: impl Borrow<I>) -> Option<i8> {
 
 pub const TB_DEFAULT: &[i32] = &[3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59];
 
-pub fn isprime_u<I: UnsignedInt + SignedClosure>(n: impl Borrow<I>) -> bool {
+pub fn isprime_u<I: BaseInt + SignedClosure>(n: impl Borrow<I>) -> bool {
     let n_signed: I::Signed = n.borrow().to_signed();
     isprime::<I::Signed>(&n_signed)
 }
@@ -496,6 +497,79 @@ pub fn isprime<I: Int>(n: impl Borrow<I>) -> bool {
         };
     }
     false
+}
+
+pub fn factorint<I: BaseInt + Factoring + std::hash::Hash>(n: impl Borrow<I>) -> HashMap<I, u32> {
+    let n: &I = n.borrow();
+    if *n == I::zero() {
+        return HashMap::new();
+    } else if *n == I::one() {
+        return HashMap::from([(I::one(), 1)]);
+    }
+    let facs: Vec<I> = n.clone().factor();
+    let mut out = HashMap::new();
+    if facs.is_empty() {
+        out.insert(n.clone(), 1);
+        return out;
+    }
+    let mut cur = facs[0].clone();
+    let mut count = 1u32;
+    for f in facs.iter().skip(1) {
+        if *f == cur {
+            count += 1;
+        } else {
+            out.insert(cur, count);
+            cur = f.clone();
+            count = 1;
+        }
+    }
+    out.insert(cur, count);
+    out
+}
+
+pub fn divisors<I: BaseInt + Factoring + std::hash::Hash>(n: impl Borrow<I>) -> Vec<I> {
+    let n = n.borrow();
+    let mut out = vec![];
+    if *n == I::zero() {
+        return out;
+    } else if *n == I::one() {
+        out.push(I::one());
+        return out;
+    }
+
+    let facs = factorint::<I>(n);
+    let mut cur_es = vec![0u32; facs.len()];
+
+    loop {
+        out.push(
+            facs.keys()
+                .zip(cur_es.iter())
+                .map(|(p, e)| ipow::<I>(p, *e))
+                .fold(I::one(), |a, b| a * b),
+        );
+        let mut i = 0;
+        loop {
+            if i >= facs.len() {
+                return out;
+            }
+            if cur_es[i] < *facs.values().nth(i).unwrap() {
+                cur_es[i] += 1;
+                break;
+            } else {
+                cur_es[i] = 0;
+                i += 1;
+            }
+        }
+    }
+}
+
+pub fn proper_divisors<I: BaseInt + Factoring + std::hash::Hash>(n: impl Borrow<I>) -> Vec<I> {
+    let mut divs = divisors(n);
+    if divs.len() <= 1 {
+        return vec![];
+    }
+    divs.drain((divs.len() - 1)..);
+    divs
 }
 
 #[cfg(test)]
@@ -665,5 +739,45 @@ mod tests_fac {
             assert!(!isprime::<i128>(n));
             assert!(isprime::<i128>(p as i128));
         }
+    }
+
+    #[test]
+    fn test_factorint() {
+        assert_eq!(
+            factorint::<u64>(360),
+            HashMap::from([(2, 3), (3, 2), (5, 1)])
+        );
+        assert_eq!(factorint::<u64>(1), HashMap::from([(1, 1)]));
+        assert_eq!(factorint::<u64>(0), HashMap::new());
+        assert_eq!(factorint::<u64>(37), HashMap::from([(37, 1)]));
+    }
+
+    #[test]
+    fn test_divisors() {
+        let mut divs = divisors::<u64>(28);
+        divs.sort();
+        assert_eq!(divs, vec![1, 2, 4, 7, 14, 28]);
+        let mut divs = divisors::<u64>(1);
+        divs.sort();
+        assert_eq!(divs, vec![1]);
+        let divs: Vec<u64> = divisors::<u64>(0);
+        assert_eq!(divs, Vec::<u64>::new());
+        let mut divs = divisors::<u64>(37);
+        divs.sort();
+        assert_eq!(divs, vec![1, 37]);
+    }
+
+    #[test]
+    fn test_proper_divisors() {
+        let mut divs = proper_divisors::<u64>(28);
+        divs.sort();
+        assert_eq!(divs, vec![1, 2, 4, 7, 14]);
+        let divs: Vec<u64> = proper_divisors::<u64>(1);
+        assert_eq!(divs, Vec::<u64>::new());
+        let divs: Vec<u64> = proper_divisors::<u64>(0);
+        assert_eq!(divs, Vec::<u64>::new());
+        let mut divs = proper_divisors::<u64>(37);
+        divs.sort();
+        assert_eq!(divs, vec![1]);
     }
 }
