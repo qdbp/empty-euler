@@ -75,7 +75,7 @@ macro_rules! examples {
         mod examples {
             use super::*;
             #[test]
-            fn test() { $( assert_eq!(solve_raw($( ( $it ), )*), $val) ;)* }
+            fn test() { $( assert_eq!(solve_raw($( ( $it ), )*), $val.to_string()) ;)* }
         }
     };
 }
