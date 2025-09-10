@@ -572,6 +572,23 @@ pub fn proper_divisors<I: BaseInt + Factoring + std::hash::Hash>(n: impl Borrow<
     divs
 }
 
+pub fn μ<I: BaseInt + Factoring>(n: impl Borrow<I>) -> i32 {
+    let mut facs: Vec<I> = n.borrow().clone().factor();
+    facs.sort();
+    if n.borrow() == &I::one() {
+        return 1;
+    }
+    let mut n_unique = 1;
+    // this handles the len=1 case since in that case we have no windows
+    for w in facs.windows(2) {
+        if w[0] == w[1] {
+            return 0;
+        }
+        n_unique += 1;
+    }
+    if n_unique % 2 == 1 { -1 } else { 1 }
+}
+
 #[cfg(test)]
 mod tests_fac {
     use super::*;
@@ -779,5 +796,23 @@ mod tests_fac {
         let mut divs = proper_divisors::<u64>(37);
         divs.sort();
         assert_eq!(divs, vec![1]);
+    }
+
+    #[test]
+    fn test_μ() {
+        assert_eq!(μ::<u64>(1), 1);
+        assert_eq!(μ::<u64>(2), -1);
+        assert_eq!(μ::<u64>(3), -1);
+        assert_eq!(μ::<u64>(4), 0);
+        assert_eq!(μ::<u64>(5), -1);
+        assert_eq!(μ::<u64>(6), 1);
+        assert_eq!(μ::<u64>(7), -1);
+        assert_eq!(μ::<u64>(8), 0);
+        assert_eq!(μ::<u64>(9), 0);
+        assert_eq!(μ::<u64>(10), 1);
+        assert_eq!(μ::<u64>(30), -1); // 2*3*5
+        assert_eq!(μ::<u64>(60), 0); // 2^2*3*5
+        assert_eq!(μ::<u64>(2 * 3 * 5 * 7), 1);
+        assert_eq!(μ::<u64>(3 * 5 * 7 * 11 * 13), -1);
     }
 }
