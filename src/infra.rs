@@ -66,6 +66,7 @@ macro_rules! soln {
             ))
         }
     };
+    ( $($body:tt)* ) => { soln! { => { $($body)* }} };
 }
 
 #[macro_export]
