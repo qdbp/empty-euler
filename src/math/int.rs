@@ -1,7 +1,7 @@
 // note: not num, we don't require div or mul here
 use core::ops::{Add, Sub};
 use facto::Factoring;
-use num_traits::{Euclid, One, Signed, Unsigned, Zero};
+use num_traits::{Euclid, One, Pow, Signed, Unsigned, Zero};
 use std::{borrow::Borrow, collections::HashMap, ops::Mul};
 
 use crate::{
@@ -589,6 +589,21 @@ pub fn μ<I: BaseInt + Factoring>(n: impl Borrow<I>) -> i32 {
     if n_unique % 2 == 1 { -1 } else { 1 }
 }
 
+/// Computes Euler's totient function
+pub fn φ<I: BaseInt + Factoring + Pow<u32, Output = I> + std::hash::Hash>(n: impl Borrow<I>) -> I {
+    let mut out = I::one();
+    if *n.borrow() == out {
+        return out;
+    }
+    for (fac, pow) in factorint::<I>(n) {
+        if pow > 1 {
+            out = out * fac.clone().pow(pow - 1);
+        }
+        out = out * (fac - I::one());
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests_fac {
     use super::*;
@@ -814,5 +829,24 @@ mod tests_fac {
         assert_eq!(μ::<u64>(60), 0); // 2^2*3*5
         assert_eq!(μ::<u64>(2 * 3 * 5 * 7), 1);
         assert_eq!(μ::<u64>(3 * 5 * 7 * 11 * 13), -1);
+    }
+
+    #[test]
+    fn test_φ() {
+        assert_eq!(φ::<u64>(1), 1);
+        assert_eq!(φ::<u64>(2), 1);
+        assert_eq!(φ::<u64>(3), 2);
+        assert_eq!(φ::<u64>(4), 2);
+        assert_eq!(φ::<u64>(5), 4);
+        assert_eq!(φ::<u64>(6), 2);
+        assert_eq!(φ::<u64>(7), 6);
+        assert_eq!(φ::<u64>(8), 4);
+        assert_eq!(φ::<u64>(9), 6);
+        assert_eq!(φ::<u64>(10), 4);
+        assert_eq!(φ::<u64>(11), 10);
+        assert_eq!(φ::<u64>(12), 4);
+        assert_eq!(φ::<u64>(13), 12);
+        assert_eq!(φ::<u64>(14), 6);
+        assert_eq!(φ::<u64>(15), 8);
     }
 }
