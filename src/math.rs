@@ -4,5 +4,7 @@ pub mod digits;
 pub mod int;
 pub mod lp;
 pub mod modular;
+pub mod partition;
+pub mod permutation;
 pub mod poly;
 pub mod primes;
