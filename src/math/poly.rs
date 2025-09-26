@@ -1,233 +1,381 @@
 use num_traits::{One, Zero};
 use std::{
     borrow::Borrow,
-    collections::{HashMap, hash_map::Entry},
+    mem,
     ops::{Add, AddAssign, Deref, Mul, MulAssign},
 };
 
-pub trait PolyCoef:
-    Clone
-    + Zero
-    + One
-    + for<'a> Mul<&'a Self, Output = Self>
-    + for<'a> Add<&'a Self, Output = Self>
-    + for<'a> AddAssign<&'a Self>
-{
+pub trait PolyCoef: Clone + Zero + One + for<'a> AddAssign<&'a Self> {}
+
+impl<T> PolyCoef for T where T: std::clone::Clone + Zero + One + for<'a> AddAssign<&'a T> {}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[repr(transparent)]
+pub struct Mono<const N: usize = 1> {
+    pub exps: [u32; N],
 }
 
-impl<T> PolyCoef for T where
-    T: std::clone::Clone
-        + Zero
-        + One
-        + for<'a> Mul<&'a T, Output = T>
-        + for<'a> Add<&'a T, Output = T>
-        + for<'a> AddAssign<&'a T>
-{
+// ord and partial ord are degrevlex by default
+impl<const N: usize> PartialOrd for Mono<N> {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl<const N: usize> Ord for Mono<N> {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        let deg_self: u32 = self.deg();
+        let deg_other: u32 = other.deg();
+        if deg_self != deg_other {
+            return deg_self.cmp(&deg_other);
+        }
+        // degrevlex
+        // walk backwards from xn to x1, and reverse the outcome if unequal
+        for i in (0..N).rev() {
+            if self.exps[i] != other.exps[i] {
+                // other.cmp(self) is correct here
+                return other.exps[i].cmp(&self.exps[i]);
+            }
+        }
+        std::cmp::Ordering::Equal
+    }
+}
+
+impl<const N: usize> Mono<N> {
+    /// Creates a monomial from an array of exponents.
+    pub fn new(coefs: [u32; N]) -> Self {
+        Mono { exps: coefs }
+    }
+
+    pub fn one() -> Self {
+        Mono { exps: [0u32; N] }
+    }
+
+    #[inline(always)]
+    pub fn deg(&self) -> u32 {
+        self.exps.iter().sum()
+    }
+}
+
+impl<const N: usize> Deref for Mono<N> {
+    type Target = [u32; N];
+    fn deref(&self) -> &Self::Target {
+        &self.exps
+    }
+}
+
+// some sugar
+impl From<u32> for Mono<1> {
+    fn from(exp: u32) -> Self {
+        Mono { exps: [exp] }
+    }
+}
+
+impl From<Mono<1>> for u32 {
+    fn from(m: Mono<1>) -> Self {
+        m.exps[0]
+    }
+}
+
+impl<const N: usize> Default for Mono<N> {
+    fn default() -> Self {
+        Self::one()
+    }
+}
+
+impl<const N: usize> Mul for Mono<N> {
+    type Output = Self;
+    #[inline(always)]
+    fn mul(self, rhs: Self) -> Self::Output {
+        Mono {
+            exps: std::array::from_fn(|i| self.exps[i] + rhs.exps[i]),
+        }
+    }
+}
+
+#[allow(clippy::suspicious_op_assign_impl)]
+impl<const N: usize> MulAssign for Mono<N> {
+    fn mul_assign(&mut self, rhs: Self) {
+        for i in 0..N {
+            self.exps[i] += rhs.exps[i];
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Poly<T: PolyCoef> {
-    pub coefs: HashMap<u64, T>,
-}
-
-#[macro_export]
-macro_rules! poly {
-
-    // stop
-    (@munch $m:ident, @end) => {};
-
-    //  + C v ^ E   /  - C v ^ E
-    (@munch $m:ident, + $c:literal * x ^ $e:literal $($rest:tt)* ) => {{
-        poly!(@push $m, $e, $c);
-        poly!(@munch $m, $($rest)*);
-    }};
-    (@munch $m:ident, - $c:literal * x ^ $e:literal $($rest:tt)* ) => {{
-        poly!(@push $m, $e, -$c);
-        poly!(@munch $m, $($rest)*);
-    }};
-
-    //  + v ^ E      /  - v ^ E
-    (@munch $m:ident,  + x ^ $e:literal $($rest:tt)* ) => {{
-        poly!(@push $m, $e, 1);
-        poly!(@munch $m, $($rest)*);
-    }};
-    (@munch $m:ident,  - x ^ $e:literal $($rest:tt)* ) => {{
-        poly!(@push $m, $e, -1);
-        poly!(@munch $m, $($rest)*);
-    }};
-
-    //  + C * v        /  - C * v
-    (@munch $m:ident,  + $c:literal * x $($rest:tt)* ) => {{
-        poly!(@push $m, 1u64, $c);
-        poly!(@munch $m, $($rest)*);
-    }};
-    (@munch $m:ident,  - $c:literal * x $($rest:tt)* ) => {{
-        poly!(@push $m, 1u64, -$c);
-        poly!(@munch $m, $($rest)*);
-    }};
-
-    //  + v          /  - v
-    (@munch $m:ident,  + x $($rest:tt)* ) => {{
-        poly!(@push $m, 1u64, 1);
-        poly!(@munch $m, $($rest)*);
-    }};
-    (@munch $m:ident,  - x $($rest:tt)* ) => {{
-        poly!(@push $m, 1u64, -1);
-        poly!(@munch $m, $($rest)*);
-    }};
-
-    //  + C          /  - C
-    (@munch $m:ident, + $c:literal $($rest:tt)* ) => {{
-        poly!(@push $m, 0u64, $c);
-        poly!(@munch $m, $($rest)*);
-    }};
-    (@munch $m:ident, - $c:literal $($rest:tt)* ) => {{
-        poly!(@push $m, 0u64, -$c);
-        poly!(@munch $m, $($rest)*);
-    }};
-
-    (@push $m:ident, $e:expr, $c:expr) => {{
-        use ::std::collections::hash_map::Entry;
-        match $m.entry($e as u64) {
-            Entry::Occupied(mut o) => { *o.get_mut() += $c; }
-            Entry::Vacant(v) => { if !$c.is_zero() { v.insert($c); } }
-        }
-    }};
-
-    (@munch $($got:tt)+) => {
-        compile_error!(concat!("unexpected tokens: ", stringify!($($got)*)));
-    };
-
-    // typed, default var x:  poly!(i64; 1 + 3x^2);
-    ( $t:ty ; $($rest:tt)+ ) => {{
-        let mut __m: ::std::collections::HashMap<u64, $t> =
-            ::std::collections::HashMap::new();
-        poly!(@munch __m, + $($rest)+);
-        Poly { coefs: __m }
-    }};
-
-    // untyped, default var x:  let p = poly!(1 + 3x^2 + 5x^3);
-    ( $($rest:tt)+ ) => {{
-        let mut __m = ::std::collections::HashMap::new();
-        poly!(@munch __m, + $($rest)+ @end);
-        Poly { coefs: __m }
-    }};
+pub struct Poly<T: PolyCoef = i32, const N: usize = 1> {
+    pub terms: Vec<(Mono<N>, T)>,
 }
 
 // invariant: we do not keep zero coefficients!
-impl<T: PolyCoef> Poly<T> {
+impl<T: PolyCoef, const N: usize> Poly<T, N> {
     pub fn new() -> Self {
-        Poly {
-            coefs: HashMap::new(),
+        Poly { terms: vec![] }
+    }
+
+    /// Parses a polynomial from a string.
+    /// The number of variables is known ahead of time. The variable names will be mapped to
+    /// monomial indices in alphabetical order. Any unseen variables (e.g. if only x appears while
+    /// parsing Poly::<T, 3>) will be mapped to the leftover high indices and will have, as
+    /// expected, exponent 0. Variable names are otherwise arbitrary strings of the following
+    /// format [a-zA-Z]{0-9}+
+    pub fn parse(s: &str) -> anyhow::Result<Self>
+    where
+        T: std::str::FromStr,
+    {
+        let mut seen_var_names = Vec::<String>::with_capacity(N);
+        let term_rx = regex::Regex::new(r"(\p{L}[0-9]*)(?:\^([1-9][0-9]*))?").unwrap();
+
+        // two passes: first to collect + sort variable names
+        for term in s.split('+').map(str::trim) {
+            if term.is_empty() {
+                anyhow::bail!("Empty term in polynomial string");
+            }
+            let mut cx = 0;
+            // skip coefficient
+            while cx < term.len() && (term.as_bytes()[cx] as char).is_ascii_digit() {
+                cx += 1;
+            }
+            term_rx.captures_iter(&term[cx..]).for_each(|cap| {
+                let var_name = cap.get(1).unwrap().as_str();
+                if !seen_var_names.iter().any(|v| v == var_name) {
+                    seen_var_names.push(var_name.to_string());
+                }
+            });
         }
+
+        // no need for a map for any reasonable N, will just look up index in vec
+        seen_var_names.sort();
+
+        if seen_var_names.is_empty() {
+            return Ok(Self::zero());
+        } else if seen_var_names.len() > N {
+            anyhow::bail!(
+                "Too many variables for Poly<_, <{N}>> (got {}: {:?})",
+                seen_var_names.len(),
+                seen_var_names
+            );
+        }
+
+        let mut terms: Vec<(Mono<N>, T)> = Vec::new();
+        for term in s.split('+').map(str::trim) {
+            // assume non-empty
+            let mut coef = String::new();
+            let mut cx = 0;
+            // parse coefficient
+            while cx < term.len() && (term.as_bytes()[cx] as char).is_ascii_digit() {
+                coef.push(term.as_bytes()[cx] as char);
+                cx += 1;
+            }
+            let coef: T = if coef.is_empty() {
+                T::one()
+            } else {
+                coef.parse().map_err(|_| {
+                    anyhow::anyhow!("Failed to parse coefficient {coef} at index {cx}")
+                })?
+            };
+            let mut mono = Mono::<N>::one();
+            term_rx.captures_iter(&term[cx..]).for_each(|cap| {
+                let var_name = cap.get(1).unwrap().as_str();
+                // SAFETY: we checked above that the variable name exists
+                let vx = seen_var_names.iter().position(|v| v == var_name).unwrap();
+                let exp = match cap.get(2) {
+                    Some(m) => m.as_str().parse().unwrap_or(1),
+                    None => 1,
+                };
+                mono.exps[vx] = exp;
+            });
+            terms.push((mono, coef));
+        }
+        Ok(Poly::from_raw_terms(terms))
+    }
+
+    /// Accepts any vector of terms, including duplicates, zero coefficients, and out of order.
+    pub fn from_raw_terms(mut terms: Vec<(Mono<N>, T)>) -> Self {
+        canonicalize_terms_inplace(&mut terms);
+        Poly { terms }
     }
 
     pub fn new_with_capacity(cap: usize) -> Self {
         Poly {
-            coefs: HashMap::with_capacity(cap),
+            terms: Vec::with_capacity(cap),
         }
     }
 
     /// Creates a monomial
-    pub fn monomial(degree: impl Into<u64>, coef: impl Into<T>) -> Self {
-        let mut coefs = HashMap::new();
-        let coef = coef.into();
-        if !coef.is_zero() {
-            coefs.insert(degree.into(), coef);
+    #[inline(always)]
+    pub fn monomial(mono: impl Into<Mono<N>>, coef: impl Into<T>) -> Self {
+        Poly {
+            terms: vec![(mono.into(), coef.into())],
         }
-        Poly { coefs }
+    }
+
+    /// Creates a constant polynomial
+    #[inline(always)]
+    pub fn constant(coef: impl Into<T>) -> Self {
+        Self::monomial(Mono::one(), coef)
     }
 }
 
-impl<T: PolyCoef> Deref for Poly<T> {
-    type Target = HashMap<u64, T>;
+fn canonicalize_terms_inplace<T: PolyCoef, const N: usize>(terms: &mut Vec<(Mono<N>, T)>) {
+    terms.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+
+    let len = terms.len();
+    let mut write = 0usize;
+    let mut read = 0usize;
+
+    // raw pointers avoid aliasing UB with &mut
+    let base = terms.as_mut_ptr();
+
+    while read < len {
+        // move first of the run into `write`
+        unsafe {
+            let head = core::ptr::read(base.add(read)); // move-out
+            core::ptr::write(base.add(write), head); // move-in
+        }
+        read += 1;
+
+        // merge later duplicates into v[write]
+        while read < len {
+            let same = unsafe { (&*base.add(read)).0 == (&*base.add(write)).0 };
+            if !same {
+                break;
+            }
+            let (_, coeff) = unsafe { core::ptr::read(base.add(read)) }; // move-out coeff
+            unsafe {
+                (&mut *base.add(write)).1 += &coeff;
+            }
+            read += 1;
+        }
+
+        // drop run if sum is zero; else keep
+        let zero = unsafe { (&*base.add(write)).1.is_zero() };
+        if zero {
+            unsafe {
+                core::ptr::drop_in_place(base.add(write));
+            }
+        } else {
+            write += 1;
+        }
+    }
+
+    unsafe {
+        terms.set_len(write);
+    }
+}
+
+// generic helper impls
+impl<T: PolyCoef, const N: usize> Deref for Poly<T, N> {
+    type Target = Vec<(Mono<N>, T)>;
     fn deref(&self) -> &Self::Target {
-        &self.coefs
+        &self.terms
     }
 }
 
-impl<T: PolyCoef> Zero for Poly<T> {
-    fn zero() -> Self {
-        Self::new()
-    }
-
-    fn is_zero(&self) -> bool {
-        self.coefs.is_empty()
-    }
-}
-
-impl<T: PolyCoef> Default for Poly<T> {
+impl<T: PolyCoef, const N: usize> Default for Poly<T, N> {
     fn default() -> Self {
         Self::zero()
     }
 }
 
-impl<T: PolyCoef> One for Poly<T> {
-    fn one() -> Self {
-        Self::monomial(0u64, T::one())
+impl<T: PolyCoef + std::fmt::Display, const N: usize> std::fmt::Display for Poly<T, N> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        const SMALL_VARS: [&str; 4] = ["x", "y", "z", "w"];
+        let mut terms: Vec<String> = Vec::new();
+        for (mono, coef) in &self.terms {
+            let mut s = String::new();
+            s.push_str(&coef.to_string());
+            for (i, &exp) in mono.exps.iter().enumerate() {
+                if exp > 0 {
+                    if N <= SMALL_VARS.len() {
+                        s.push_str(SMALL_VARS[i]);
+                    } else {
+                        s.push('x');
+                        s.push_str(&i.to_string());
+                    }
+                    if exp > 1 {
+                        s.push('^');
+                        s.push_str(&exp.to_string());
+                    }
+                }
+            }
+            terms.push(s);
+        }
+        terms.reverse(); // grevlex display order: high terms first
+        write!(f, "{}", terms.join(" + "))
     }
 }
 
-impl<T: PolyCoef> Add for Poly<T> {
-    type Output = Poly<T>;
+impl<T: PolyCoef, const N: usize, Rhs> Add<Rhs> for Poly<T, N>
+where
+    Rhs: Borrow<Poly<T, N>>,
+{
+    type Output = Poly<T, N>;
 
     #[inline(always)]
-    fn add(self, rhs: Self) -> Self::Output {
+    fn add(self, rhs: Rhs) -> Self::Output {
         let mut out = self.clone();
         out += rhs;
         out
     }
 }
 
-impl<T: PolyCoef> AddAssign for Poly<T> {
-    fn add_assign(&mut self, rhs: Self) {
-        for (pow, coef) in rhs.coefs.iter() {
-            let entry = self.coefs.entry(*pow);
-            match entry {
-                Entry::Occupied(mut e) => {
-                    let remove = {
-                        let v = e.get_mut();
-                        *v += coef;
-                        v.is_zero()
-                    };
-                    if remove {
-                        e.remove();
-                    }
+impl<T: PolyCoef, const N: usize, Rhs> AddAssign<Rhs> for Poly<T, N>
+where
+    Rhs: Borrow<Poly<T, N>>,
+{
+    fn add_assign(&mut self, rhs: Rhs) {
+        let a = mem::take(&mut self.terms); // old self, sorted
+        let b = &rhs.borrow().terms; // sorted
+        self.terms = Vec::with_capacity(a.len() + b.len());
+        let (mut i, mut j) = (0, 0);
+        while i < a.len() && j < b.len() {
+            match a[i].0.cmp(&b[j].0) {
+                std::cmp::Ordering::Less => {
+                    self.terms.push(a[i].clone());
+                    i += 1;
                 }
-                Entry::Vacant(e) => {
-                    // no check here, we assume invariant holds and coef is not zero
-                    e.insert(coef.clone());
+                std::cmp::Ordering::Greater => {
+                    self.terms.push(b[j].clone());
+                    j += 1;
+                }
+                std::cmp::Ordering::Equal => {
+                    let (m, mut c) = a[i].clone();
+                    c += &b[j].1;
+                    if !c.is_zero() {
+                        self.terms.push((m, c));
+                    }
+                    i += 1;
+                    j += 1;
                 }
             }
         }
+        self.terms.extend_from_slice(&a[i..]);
+        self.terms.extend_from_slice(&b[j..]);
     }
 }
 
-impl<T: PolyCoef, Rhs> Mul<Rhs> for Poly<T>
+impl<T: PolyCoef, const N: usize, Rhs> Mul<Rhs> for Poly<T, N>
 where
-    Rhs: Borrow<Poly<T>>,
+    Rhs: Borrow<Poly<T, N>>,
 {
     type Output = Self;
 
-    fn mul(self, rhs: Rhs) -> Self::Output {
-        // this is the minimum capacity estimate, for large poly's we'd rather
-        // reallocate a few times than egregiously waste memory -- the upper bound
-        // is quadratic in the sizes of the polys!
-        let mut out = Self::new_with_capacity(self.len());
-        let rhs = rhs.borrow();
-        for (pow0, coef0) in self.coefs.iter() {
-            for (pow1, coef1) in rhs.coefs.iter() {
-                let new_coef = coef0.clone() * coef1;
-                *out.coefs.entry(pow0 + pow1).or_insert_with(T::zero) += &new_coef;
+    fn mul(self, rhs: Rhs) -> Poly<T, N> {
+        let rhs: &Poly<T, N> = rhs.borrow();
+        let mut buf = Vec::with_capacity(self.terms.len() * rhs.terms.len());
+        for (m1, c1) in &self.terms {
+            for (m2, c2) in &rhs.terms {
+                buf.push((*m1 * *m2, c1.clone() * c2.clone()));
             }
         }
-        out
+        Self::from_raw_terms(buf)
     }
 }
 
-impl<T: PolyCoef, Rhs> MulAssign<Rhs> for Poly<T>
+impl<T: PolyCoef, const N: usize, Rhs> MulAssign<Rhs> for Poly<T, N>
 where
-    Rhs: Borrow<Poly<T>>,
+    Rhs: Borrow<Poly<T, N>>,
 {
     fn mul_assign(&mut self, rhs: Rhs) {
         let lhs = std::mem::take(self);
@@ -235,21 +383,23 @@ where
     }
 }
 
-impl<T: PolyCoef + std::fmt::Display> std::fmt::Display for Poly<T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut terms: Vec<String> = Vec::new();
-        let mut sorted_keys: Vec<&u64> = self.coefs.keys().collect();
-        sorted_keys.sort();
-        for &pow in sorted_keys.iter() {
-            let coef = &self.coefs[pow];
-            let term = match pow {
-                0 => format!("{}", coef),
-                1 => format!("{}x", coef),
-                _ => format!("{}x^{}", coef, pow),
-            };
-            terms.push(term);
-        }
-        write!(f, "{}", terms.join(" + "))
+// forward non-reference arithmetic impls
+//
+
+// num_traits impls
+impl<T: PolyCoef, const N: usize> Zero for Poly<T, N> {
+    fn zero() -> Self {
+        Self::new()
+    }
+
+    fn is_zero(&self) -> bool {
+        self.terms.is_empty()
+    }
+}
+
+impl<T: PolyCoef, const N: usize> One for Poly<T, N> {
+    fn one() -> Self {
+        Self::monomial(Mono::one(), T::one())
     }
 }
 
@@ -257,69 +407,158 @@ impl<T: PolyCoef + std::fmt::Display> std::fmt::Display for Poly<T> {
 mod tests {
     use super::*;
 
+    type P = Poly<i32, 1>;
+    type P3 = Poly<u64, 3>;
+
+    #[test]
+    fn test_mono_grevlex() {
+        let x0x0 = Mono::new([2, 0, 0]); // x0^2
+        let x1x1 = Mono::new([0, 2, 0]); // x1^2
+        let x2x2 = Mono::new([0, 0, 2]); // x2^2
+        let x0x1 = Mono::new([1, 1, 0]); // x0x1
+        let x1x2 = Mono::new([0, 1, 1]); // x1x2
+        let x0x2 = Mono::new([1, 0, 1]);
+        let x0 = Mono::new([1, 0, 0]);
+        let x1 = Mono::new([0, 1, 0]);
+        let x2 = Mono::new([0, 0, 1]);
+        // note that this means that higher degree will be at the back of the list!
+        assert!(x0x0 > x0x1);
+        assert!(x0x1 > x1x1);
+        assert!(x1x1 > x0x2);
+        let mut monos = vec![x0x0, x0, x1x1, x2x2, x1, x0x1, x1x2, x2, x0x2];
+        monos.sort_unstable();
+        monos.reverse();
+        assert_eq!(monos, vec![x0x0, x0x1, x1x1, x0x2, x1x2, x2x2, x0, x1, x2]);
+    }
+
     #[test]
     fn test_new_polynomial() {
-        let poly: Poly<i32> = Poly::new();
+        let poly: Poly<i32, 1> = Poly::new();
         assert!(poly.is_zero());
+
+        let multivar: Poly<i32, 3> = Poly::new();
+        assert!(multivar.is_zero());
     }
 
     #[test]
     fn test_from_coefficient() {
-        let poly = poly!(5);
-        assert_eq!(poly.coefs.get(&0), Some(&5));
-        assert_eq!(poly.coefs.len(), 1);
+        let poly = P::constant(5);
+        assert_eq!(poly.terms[0].1, 5);
+        assert_eq!(poly.terms.len(), 1);
     }
 
     #[test]
-    fn test_addition() {
-        let poly1 = poly!(3 + 2 * x);
-        let poly2 = poly!(1 + 4 * x);
+    fn test_parse_univar() {
+        let poly = P::parse("3 + 2x + 5x^2").unwrap();
+        assert_eq!(poly.terms.len(), 3);
+        assert_eq!(poly.terms[0], (Mono::new([0]), 3));
+        assert_eq!(poly.terms[1], (Mono::new([1]), 2));
+        assert_eq!(poly.terms[2], (Mono::new([2]), 5));
+    }
+
+    #[test]
+    fn test_parse_multivar() {
+        // we expect terms in grevlex order (reversed in vec)
+        let poly = Poly::<i32, 3>::parse("3 + 4y + 2x + 7z^3 + 5x^2y").unwrap();
+        assert_eq!(poly.terms.len(), 5);
+        assert_eq!(poly.terms[0], (Mono::new([0, 0, 0]), 3));
+        assert_eq!(poly.terms[1], (Mono::new([0, 1, 0]), 4));
+        assert_eq!(poly.terms[2], (Mono::new([1, 0, 0]), 2));
+        assert_eq!(poly.terms[3], (Mono::new([0, 0, 3]), 7));
+        assert_eq!(poly.terms[4], (Mono::new([2, 1, 0]), 5));
+    }
+
+    #[test]
+    fn test_term_canonicalize() {
+        let terms = vec![
+            (Mono::new([1]), 2),
+            (Mono::new([0]), 3),
+            (Mono::new([1]), 4),
+            (Mono::new([2]), 5),
+            (Mono::new([0]), -3),
+        ];
+        let poly = Poly::<i32, 1>::from_raw_terms(terms);
+        assert_eq!(poly.terms.len(), 2);
+        assert_eq!(poly.terms[0], (Mono::new([1]), 6));
+        assert_eq!(poly.terms[1], (Mono::new([2]), 5));
+    }
+
+    #[test]
+    fn test_add_univar() {
+        let poly1 = P::parse("3 + 2x").unwrap();
+        let poly2 = P::parse("1 + 4x").unwrap();
 
         let result = poly1 + poly2; // Should be 4 + 6x
-        assert_eq!(result.coefs.get(&0), Some(&4));
-        assert_eq!(result.coefs.get(&1), Some(&6));
+        assert_eq!(result, P::parse("4 + 6x").unwrap());
     }
 
     #[test]
-    fn test_add_assign() {
-        let mut poly1 = poly!(3 + 2 * x);
-        let poly2 = poly!(1 + 4 * x);
-        poly1 += poly2; // Should be 4 + 6x
-        assert_eq!(poly1, poly!(4 + 6 * x));
+    fn test_add_multivar() {
+        // we need the zeros to force the polynomials to be distinct --
+        // there is no shared symbolic processing, and parse is just a shorthand!
+        let poly1 = P3::parse("3 + 2x + 4y + 0z").unwrap();
+        let poly2 = P3::parse("1 + 4x + 0y + 5z").unwrap();
+        assert_eq!(poly1 + poly2, P3::parse("4 + 6x + 4y + 5z").unwrap());
     }
 
     #[test]
-    fn test_multiplication_with_terms() {
-        let poly1 = poly!(2 + 3 * x);
-        let poly2 = poly!(1 + x);
-
-        let result = poly1 * poly2; // (2 + 3x)(1 + x) = 2 + 2x + 3x + 3x^2 = 2 + 5x + 3x^2
-        assert_eq!(result, poly!(2 + 5 * x + 3 * x ^ 2));
+    fn test_add_assign_multivar() {
+        let mut poly1 = P3::parse("3 + 2x + 4y + 0z").unwrap();
+        let poly2 = P3::parse("1 + 4x + 0y + 5z").unwrap();
+        poly1 += poly2;
+        assert_eq!(poly1, P3::parse("4 + 6x + 4y + 5z").unwrap());
     }
 
     #[test]
-    fn test_mul_assign() {
-        let mut poly1 = poly!(2 + 3 * x);
-        let poly2 = poly!(1 + x);
-        poly1 *= poly2; // (2 + 3x)(1 + x) = 2 + 5x + 3x^2
-        assert_eq!(poly1, poly!(2 + 5 * x + 3 * x ^ 2));
+    fn test_mul_univar() {
+        let poly1 = P::parse("2 + 3x").unwrap();
+        let poly2 = P::parse("1 + x").unwrap();
+        assert_eq!(poly1 * poly2, P::parse("2 + 5x + 3x^2").unwrap());
     }
 
+    #[test]
+    fn test_mul_assign_univar() {
+        let mut poly1 = P::parse("2 + 3x").unwrap();
+        let poly2 = P::parse("1 + x").unwrap();
+        poly1 *= poly2;
+        assert_eq!(poly1, P::parse("2 + 5x + 3x^2").unwrap());
+    }
+
+    #[test]
+    fn test_mul_multivar() {
+        let poly1 = P3::parse("2 + 3x + y + 0z").unwrap();
+        let poly2 = P3::parse("1 + x + 0y + z").unwrap();
+        let out = poly1 * poly2;
+        let expect = P3::parse("2 + 5x + 3x^2 + y + xy + 2z + 3xz + yz").unwrap();
+        out.terms
+            .iter()
+            .zip(expect.terms.iter())
+            .for_each(|(a, b)| {
+                assert_eq!(a, b);
+            });
+    }
+
+    /// Checks that the zero-polynomial is valid
     #[test]
     fn test_zero_polynomial() {
-        let zero_poly = poly!(0);
-        let other_poly = poly!(5);
-
-        let result1 = zero_poly.clone() + other_poly.clone();
-        assert_eq!(result1.coefs, other_poly.coefs);
-
-        let result2 = zero_poly * other_poly;
-        assert!(result2.is_zero());
+        let poly = P::parse("0").unwrap();
+        assert!(poly.is_zero());
     }
 
     #[test]
-    fn test_display() {
-        let poly = poly!(3 + 2 * x + 5 * x ^ 2);
-        assert_eq!(format!("{}", poly), "3 + 2x + 5x^2");
+    fn test_display_short() {
+        let poly = P3::parse("3 + 2x + 4y + 5x^2y + 7z^3").unwrap();
+        assert_eq!(poly.to_string(), "5x^2y + 7z^3 + 2x + 4y + 3");
+    }
+
+    #[test]
+    fn test_display_long() {
+        let p = Poly::<i32, 5>::from_raw_terms(vec![
+            (Mono::new([2, 0, 1, 0, 0]), 3),
+            (Mono::new([0, 1, 0, 0, 0]), 4),
+            (Mono::new([1, 0, 0, 2, 0]), 5),
+            (Mono::new([0, 0, 0, 0, 4]), 7),
+        ]);
+        assert_eq!(p.to_string(), "7x4^4 + 3x0^2x2 + 5x0x3^2 + 4x1");
     }
 }
