@@ -5,6 +5,8 @@ use core::ops::{Mul, Sub};
 use fixedbitset::FixedBitSet;
 use num_traits::{Euclid, Zero};
 
+use crate::iter::LazyVec;
+
 const INIT_PRIMES: &[u32] = &[2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47];
 const BASE_PRIMES: &[u32] = &[3, 5, 7];
 
@@ -192,6 +194,11 @@ pub fn first_n_primes<T: PG>(n: usize) -> Vec<T> {
 
 pub fn primes_leq<T: PG + Ord>(n: T) -> Vec<T> {
     PrimeGen::<T>::new().take_while(|p| *p <= n).collect()
+}
+
+/// A lazy vector v such that v.at(i) will be the ith prime (0-indexed)
+pub fn lazy_primes<T: PG>() -> LazyVec<PrimeGen<T>, T> {
+    LazyVec::new(PrimeGen::<T>::new())
 }
 
 #[cfg(test)]

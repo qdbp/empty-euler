@@ -9,13 +9,13 @@ pub trait PolyCoef: Clone + Zero + One + for<'a> AddAssign<&'a Self> {}
 
 impl<T> PolyCoef for T where T: std::clone::Clone + Zero + One + for<'a> AddAssign<&'a T> {}
 
+/// An abstract monomial term in N (anonymous) variables, with no defined coefficient.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[repr(transparent)]
 pub struct Mono<const N: usize = 1> {
     pub exps: [u32; N],
 }
 
-// ord and partial ord are degrevlex by default
 impl<const N: usize> PartialOrd for Mono<N> {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
@@ -23,6 +23,7 @@ impl<const N: usize> PartialOrd for Mono<N> {
 }
 
 impl<const N: usize> Ord for Mono<N> {
+    /// Compares two monomials in degree-reverse-lexicographic order (degrevlex).
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         let deg_self: u32 = self.deg();
         let deg_other: u32 = other.deg();
@@ -47,10 +48,12 @@ impl<const N: usize> Mono<N> {
         Mono { exps: coefs }
     }
 
+    /// Creates the multiplicative identity monomial (all exponents zero).
     pub fn one() -> Self {
         Mono { exps: [0u32; N] }
     }
 
+    /// The degree of the monomial.
     #[inline(always)]
     pub fn deg(&self) -> u32 {
         self.exps.iter().sum()
@@ -103,8 +106,20 @@ impl<const N: usize> MulAssign for Mono<N> {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Term<T: PolyCoef, const N: usize> {
+    pub mono: Mono<N>,
+    pub coef: T,
+}
+
+impl<T: PolyCoef, const N: usize> From<(Mono<N>, T)> for Term<T, N> {
+    fn from((m, c): (Mono<N>, T)) -> Self {
+        Term { mono: m, coef: c }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Poly<T: PolyCoef = i32, const N: usize = 1> {
-    pub terms: Vec<(Mono<N>, T)>,
+    pub terms: Vec<Term<T, N>>,
 }
 
 // invariant: we do not keep zero coefficients!
@@ -114,11 +129,21 @@ impl<T: PolyCoef, const N: usize> Poly<T, N> {
     }
 
     /// Parses a polynomial from a string.
-    /// The number of variables is known ahead of time. The variable names will be mapped to
-    /// monomial indices in alphabetical order. Any unseen variables (e.g. if only x appears while
+    ///
+    /// The number of variables is given ahead of time. Parsed variable names will be mapped to
+    /// monomial indices in alphabetical order. Any implicit variables (e.g. if only x appears while
     /// parsing Poly::<T, 3>) will be mapped to the leftover high indices and will have, as
     /// expected, exponent 0. Variable names are otherwise arbitrary strings of the following
     /// format [a-zA-Z]{0-9}+
+    ///
+    /// To force a certain vairable order, a zero-coefficient term can be inserted
+    /// ```rust
+    /// use pe_lib::math::poly::{Poly,Mono};
+    /// let p = Poly::<i32, 3>::parse("5 + y").unwrap();
+    /// assert_eq!(p.terms[1].mono, Mono::new([1, 0, 0])); // y is the only var, so it gets index 0
+    /// let p = Poly::<i32, 3>::parse("5 + 0x + y").unwrap();
+    /// assert_eq!(p.terms[1].mono, Mono::new([0, 1, 0])); // the dummy x forces y to index 1
+    /// ```
     pub fn parse(s: &str) -> anyhow::Result<Self>
     where
         T: std::str::FromStr,
@@ -157,7 +182,7 @@ impl<T: PolyCoef, const N: usize> Poly<T, N> {
             );
         }
 
-        let mut terms: Vec<(Mono<N>, T)> = Vec::new();
+        let mut terms: Vec<Term<T, N>> = Vec::new();
         for term in s.split('+').map(str::trim) {
             // assume non-empty
             let mut coef = String::new();
@@ -185,13 +210,13 @@ impl<T: PolyCoef, const N: usize> Poly<T, N> {
                 };
                 mono.exps[vx] = exp;
             });
-            terms.push((mono, coef));
+            terms.push((mono, coef).into());
         }
         Ok(Poly::from_raw_terms(terms))
     }
 
     /// Accepts any vector of terms, including duplicates, zero coefficients, and out of order.
-    pub fn from_raw_terms(mut terms: Vec<(Mono<N>, T)>) -> Self {
+    pub fn from_raw_terms(mut terms: Vec<Term<T, N>>) -> Self {
         canonicalize_terms_inplace(&mut terms);
         Poly { terms }
     }
@@ -206,7 +231,10 @@ impl<T: PolyCoef, const N: usize> Poly<T, N> {
     #[inline(always)]
     pub fn monomial(mono: impl Into<Mono<N>>, coef: impl Into<T>) -> Self {
         Poly {
-            terms: vec![(mono.into(), coef.into())],
+            terms: vec![Term {
+                mono: mono.into(),
+                coef: coef.into(),
+            }],
         }
     }
 
@@ -217,8 +245,8 @@ impl<T: PolyCoef, const N: usize> Poly<T, N> {
     }
 }
 
-fn canonicalize_terms_inplace<T: PolyCoef, const N: usize>(terms: &mut Vec<(Mono<N>, T)>) {
-    terms.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+fn canonicalize_terms_inplace<T: PolyCoef, const N: usize>(terms: &mut Vec<Term<T, N>>) {
+    terms.sort_unstable_by(|a, b| a.mono.cmp(&b.mono));
 
     let len = terms.len();
     let mut write = 0usize;
@@ -237,19 +265,19 @@ fn canonicalize_terms_inplace<T: PolyCoef, const N: usize>(terms: &mut Vec<(Mono
 
         // merge later duplicates into v[write]
         while read < len {
-            let same = unsafe { (&*base.add(read)).0 == (&*base.add(write)).0 };
+            let same = unsafe { (&*base.add(read)).mono == (&*base.add(write)).mono };
             if !same {
                 break;
             }
-            let (_, coeff) = unsafe { core::ptr::read(base.add(read)) }; // move-out coeff
+            let term = unsafe { core::ptr::read(base.add(read)) }; // move-out coeff
             unsafe {
-                (&mut *base.add(write)).1 += &coeff;
+                (&mut *base.add(write)).coef += &term.coef;
             }
             read += 1;
         }
 
         // drop run if sum is zero; else keep
-        let zero = unsafe { (&*base.add(write)).1.is_zero() };
+        let zero = unsafe { (&*base.add(write)).coef.is_zero() };
         if zero {
             unsafe {
                 core::ptr::drop_in_place(base.add(write));
@@ -266,7 +294,7 @@ fn canonicalize_terms_inplace<T: PolyCoef, const N: usize>(terms: &mut Vec<(Mono
 
 // generic helper impls
 impl<T: PolyCoef, const N: usize> Deref for Poly<T, N> {
-    type Target = Vec<(Mono<N>, T)>;
+    type Target = Vec<Term<T, N>>;
     fn deref(&self) -> &Self::Target {
         &self.terms
     }
@@ -282,10 +310,10 @@ impl<T: PolyCoef + std::fmt::Display, const N: usize> std::fmt::Display for Poly
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         const SMALL_VARS: [&str; 4] = ["x", "y", "z", "w"];
         let mut terms: Vec<String> = Vec::new();
-        for (mono, coef) in &self.terms {
+        for term in &self.terms {
             let mut s = String::new();
-            s.push_str(&coef.to_string());
-            for (i, &exp) in mono.exps.iter().enumerate() {
+            s.push_str(&term.coef.to_string());
+            for (i, &exp) in term.mono.exps.iter().enumerate() {
                 if exp > 0 {
                     if N <= SMALL_VARS.len() {
                         s.push_str(SMALL_VARS[i]);
@@ -330,7 +358,7 @@ where
         self.terms = Vec::with_capacity(a.len() + b.len());
         let (mut i, mut j) = (0, 0);
         while i < a.len() && j < b.len() {
-            match a[i].0.cmp(&b[j].0) {
+            match a[i].mono.cmp(&b[j].mono) {
                 std::cmp::Ordering::Less => {
                     self.terms.push(a[i].clone());
                     i += 1;
@@ -340,10 +368,10 @@ where
                     j += 1;
                 }
                 std::cmp::Ordering::Equal => {
-                    let (m, mut c) = a[i].clone();
-                    c += &b[j].1;
-                    if !c.is_zero() {
-                        self.terms.push((m, c));
+                    let mut a_term = a[i].clone();
+                    a_term.coef += &b[j].coef;
+                    if !a_term.coef.is_zero() {
+                        self.terms.push(a_term);
                     }
                     i += 1;
                     j += 1;
@@ -364,9 +392,12 @@ where
     fn mul(self, rhs: Rhs) -> Poly<T, N> {
         let rhs: &Poly<T, N> = rhs.borrow();
         let mut buf = Vec::with_capacity(self.terms.len() * rhs.terms.len());
-        for (m1, c1) in &self.terms {
-            for (m2, c2) in &rhs.terms {
-                buf.push((*m1 * *m2, c1.clone() * c2.clone()));
+        for term0 in &self.terms {
+            for term1 in &rhs.terms {
+                buf.push(Term {
+                    mono: term0.mono * term1.mono,
+                    coef: term0.coef.clone() * term1.coef.clone(),
+                });
             }
         }
         Self::from_raw_terms(buf)
@@ -443,7 +474,7 @@ mod tests {
     #[test]
     fn test_from_coefficient() {
         let poly = P::constant(5);
-        assert_eq!(poly.terms[0].1, 5);
+        assert_eq!(poly.terms[0].coef, 5);
         assert_eq!(poly.terms.len(), 1);
     }
 
@@ -451,9 +482,9 @@ mod tests {
     fn test_parse_univar() {
         let poly = P::parse("3 + 2x + 5x^2").unwrap();
         assert_eq!(poly.terms.len(), 3);
-        assert_eq!(poly.terms[0], (Mono::new([0]), 3));
-        assert_eq!(poly.terms[1], (Mono::new([1]), 2));
-        assert_eq!(poly.terms[2], (Mono::new([2]), 5));
+        assert_eq!(poly.terms[0], (Mono::new([0]), 3).into());
+        assert_eq!(poly.terms[1], (Mono::new([1]), 2).into());
+        assert_eq!(poly.terms[2], (Mono::new([2]), 5).into());
     }
 
     #[test]
@@ -461,26 +492,26 @@ mod tests {
         // we expect terms in grevlex order (reversed in vec)
         let poly = Poly::<i32, 3>::parse("3 + 4y + 2x + 7z^3 + 5x^2y").unwrap();
         assert_eq!(poly.terms.len(), 5);
-        assert_eq!(poly.terms[0], (Mono::new([0, 0, 0]), 3));
-        assert_eq!(poly.terms[1], (Mono::new([0, 1, 0]), 4));
-        assert_eq!(poly.terms[2], (Mono::new([1, 0, 0]), 2));
-        assert_eq!(poly.terms[3], (Mono::new([0, 0, 3]), 7));
-        assert_eq!(poly.terms[4], (Mono::new([2, 1, 0]), 5));
+        assert_eq!(poly.terms[0], (Mono::new([0, 0, 0]), 3).into());
+        assert_eq!(poly.terms[1], (Mono::new([0, 1, 0]), 4).into());
+        assert_eq!(poly.terms[2], (Mono::new([1, 0, 0]), 2).into());
+        assert_eq!(poly.terms[3], (Mono::new([0, 0, 3]), 7).into());
+        assert_eq!(poly.terms[4], (Mono::new([2, 1, 0]), 5).into());
     }
 
     #[test]
     fn test_term_canonicalize() {
         let terms = vec![
-            (Mono::new([1]), 2),
-            (Mono::new([0]), 3),
-            (Mono::new([1]), 4),
-            (Mono::new([2]), 5),
-            (Mono::new([0]), -3),
+            (Mono::new([1]), 2).into(),
+            (Mono::new([0]), 3).into(),
+            (Mono::new([1]), 4).into(),
+            (Mono::new([2]), 5).into(),
+            (Mono::new([0]), -3).into(),
         ];
         let poly = Poly::<i32, 1>::from_raw_terms(terms);
         assert_eq!(poly.terms.len(), 2);
-        assert_eq!(poly.terms[0], (Mono::new([1]), 6));
-        assert_eq!(poly.terms[1], (Mono::new([2]), 5));
+        assert_eq!(poly.terms[0], (Mono::new([1]), 6).into());
+        assert_eq!(poly.terms[1], (Mono::new([2]), 5).into());
     }
 
     #[test]
@@ -554,10 +585,10 @@ mod tests {
     #[test]
     fn test_display_long() {
         let p = Poly::<i32, 5>::from_raw_terms(vec![
-            (Mono::new([2, 0, 1, 0, 0]), 3),
-            (Mono::new([0, 1, 0, 0, 0]), 4),
-            (Mono::new([1, 0, 0, 2, 0]), 5),
-            (Mono::new([0, 0, 0, 0, 4]), 7),
+            (Mono::new([2, 0, 1, 0, 0]), 3).into(),
+            (Mono::new([0, 1, 0, 0, 0]), 4).into(),
+            (Mono::new([1, 0, 0, 2, 0]), 5).into(),
+            (Mono::new([0, 0, 0, 0, 4]), 7).into(),
         ]);
         assert_eq!(p.to_string(), "7x4^4 + 3x0^2x2 + 5x0x3^2 + 4x1");
     }

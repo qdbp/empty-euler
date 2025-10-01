@@ -23,7 +23,7 @@ fn bench_factoring_1m(c: &mut Criterion) {
 criterion_group!(
     name = benches;
     config = Criterion::default()
-        .sample_size(10)              // tune as desired
+        .sample_size(10)
         .warm_up_time(std::time::Duration::from_secs(1))
         .measurement_time(std::time::Duration::from_secs(5));
     targets = bench_factoring_1m

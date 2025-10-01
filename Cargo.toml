@@ -1,16 +1,7 @@
 [package]
 name = "pe"
-version = "0.1.0"
+version = "0.9.0"
 edition = "2024"
-
-
-[[bench]]
-name = "primegen"
-harness = false
-
-[[bench]]
-name = "primes"
-harness = false
 
 [profile.release]
 opt-level = 3
@@ -56,6 +47,20 @@ priority-queue = "2.6.0"
 ahash = "0.8.12"
 f128 = "0.2.9"
 regex = "1.11.3"
+thin-vec = "0.2.14"
+dary_heap = "0.3.8"
 
 [dev-dependencies]
 criterion = { version = "0.7.0", features = ["html_reports"] }
+
+[[bench]]
+name = "primegen"
+harness = false
+
+[[bench]]
+name = "primes"
+harness = false
+
+[[bench]]
+name = "sieve"
+harness = false

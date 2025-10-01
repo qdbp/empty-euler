@@ -173,7 +173,7 @@ pub fn modinv<I: Int>(a: impl Borrow<I>, M: impl Borrow<I>) -> Option<I> {
 
 pub fn introot<I: Int>(n: impl Borrow<I>, r: u32) -> Option<I> {
     if is_neg::<I>(n.borrow()) {
-        if r % 2 == 0 {
+        if r.is_multiple_of(2) {
             return None;
         }
         let x = introot::<I>(&abs(n), r)?;
@@ -501,10 +501,8 @@ pub fn isprime<I: Int>(n: impl Borrow<I>) -> bool {
 
 pub fn factorint<I: BaseInt + Factoring + std::hash::Hash>(n: impl Borrow<I>) -> HashMap<I, u32> {
     let n: &I = n.borrow();
-    if *n == I::zero() {
+    if *n == I::zero() || *n == I::one() {
         return HashMap::new();
-    } else if *n == I::one() {
-        return HashMap::from([(I::one(), 1)]);
     }
     let facs: Vec<I> = n.clone().factor();
     let mut out = HashMap::new();
@@ -530,9 +528,7 @@ pub fn factorint<I: BaseInt + Factoring + std::hash::Hash>(n: impl Borrow<I>) ->
 pub fn divisors<I: BaseInt + Factoring + std::hash::Hash>(n: impl Borrow<I>) -> Vec<I> {
     let n = n.borrow();
     let mut out = vec![];
-    if *n == I::zero() {
-        return out;
-    } else if *n == I::one() {
+    if *n == I::zero() || *n == I::one() {
         out.push(I::one());
         return out;
     }
@@ -779,8 +775,8 @@ mod tests_fac {
             factorint::<u64>(360),
             HashMap::from([(2, 3), (3, 2), (5, 1)])
         );
-        assert_eq!(factorint::<u64>(1), HashMap::from([(1, 1)]));
         assert_eq!(factorint::<u64>(0), HashMap::new());
+        assert_eq!(factorint::<u64>(1), HashMap::new());
         assert_eq!(factorint::<u64>(37), HashMap::from([(37, 1)]));
     }
 
@@ -793,7 +789,7 @@ mod tests_fac {
         divs.sort();
         assert_eq!(divs, vec![1]);
         let divs: Vec<u64> = divisors::<u64>(0);
-        assert_eq!(divs, Vec::<u64>::new());
+        assert_eq!(divs, vec![1]);
         let mut divs = divisors::<u64>(37);
         divs.sort();
         assert_eq!(divs, vec![1, 37]);

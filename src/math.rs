@@ -1,10 +1,14 @@
 pub mod algo;
+pub mod bfs;
 pub mod bits;
 pub mod digits;
+pub mod dirichlet;
 pub mod int;
+pub mod iter;
 pub mod lp;
 pub mod modular;
 pub mod partition;
 pub mod permutation;
 pub mod poly;
 pub mod primes;
+pub mod sieve;
