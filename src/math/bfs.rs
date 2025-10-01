@@ -300,11 +300,10 @@ where
 ///     1. ∀d,n: it(d)[n] > it(d)[n - 1]
 ///     2. ∀d>1: it(d)[0] > it(d - 1)[0]
 ///     3. no iterator will ever yield None.
-#[allow(unused)]
-fn infinite_merge<T, F>(f: F) -> impl Iterator<Item = T>
+pub fn infinite_merge<T, F>(f: F) -> impl Iterator<Item = T>
 where
     F: Fn(usize) -> Box<dyn Iterator<Item = T>>,
-    T: Ord,
+    T: Ord + std::fmt::Debug,
 {
     let d0 = f(0);
     let mut dim_iters = vec![d0];

@@ -1,12 +1,16 @@
 // note: not num, we don't require div or mul here
+use ahash::AHashMap;
 use core::ops::{Add, Sub};
 use facto::Factoring;
 use num_traits::{Euclid, One, Pow, Signed, Unsigned, Zero};
-use std::{borrow::Borrow, collections::HashMap, ops::Mul};
+use std::{
+    borrow::Borrow,
+    ops::{Deref, Mul, MulAssign},
+};
 
 use crate::{
     algo::expsq,
-    primes::{PG, PrimeGen},
+    primes::{PrimeGen, PG},
 };
 pub trait BaseInt:
     Clone
@@ -79,7 +83,7 @@ fn abs<I: Int>(x: impl Borrow<I>) -> I {
     }
 }
 #[inline]
-fn is_zero<I: Int>(x: impl Borrow<I>) -> bool {
+fn is_zero<I: BaseInt>(x: impl Borrow<I>) -> bool {
     *x.borrow() == I::zero()
 }
 #[inline]
@@ -122,7 +126,17 @@ fn pow_mod<I: Int>(base: impl Borrow<I>, exp: impl Borrow<I>, modulus: impl Borr
     acc
 }
 
-pub fn gcd<I: Int>(a: impl Borrow<I>, b: impl Borrow<I>) -> I {
+pub fn gcd<I: BaseInt>(a: impl Borrow<I>, b: impl Borrow<I>) -> I {
+    let (mut a, mut b) = (a.borrow().clone(), b.borrow().clone());
+    while !is_zero::<I>(&b) {
+        let r = a.clone() % b.clone();
+        a = b;
+        b = r;
+    }
+    a
+}
+
+pub fn gcd_signed<I: Int>(a: impl Borrow<I>, b: impl Borrow<I>) -> I {
     let (mut a, mut b) = (a.borrow().clone(), b.borrow().clone());
     while !is_zero::<I>(&b) {
         let r = a.rem_euclid(&b);
@@ -325,7 +339,11 @@ pub fn jacobi<I: Int>(a: impl Borrow<I>, n: impl Borrow<I>) -> Option<i8> {
             a.rem_euclid(n)
         };
     }
-    if is_one(n) { Some(t) } else { Some(0) }
+    if is_one(n) {
+        Some(t)
+    } else {
+        Some(0)
+    }
 }
 
 pub const TB_DEFAULT: &[i32] = &[3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59];
@@ -408,7 +426,7 @@ pub fn isprime<I: Int>(n: impl Borrow<I>) -> bool {
 
     // run slprp(n, 1, (1 - D) // 4)
     let b = (I::one() - D.clone()).div_euclid(&c::<I>(4));
-    let g = gcd::<I>(&n, &b);
+    let g = gcd_signed::<I>(&n, &b);
     if g > I::one() && g < n {
         return false;
     }
@@ -499,30 +517,116 @@ pub fn isprime<I: Int>(n: impl Borrow<I>) -> bool {
     false
 }
 
-pub fn factorint<I: BaseInt + Factoring + std::hash::Hash>(n: impl Borrow<I>) -> HashMap<I, u32> {
-    let n: &I = n.borrow();
-    if *n == I::zero() || *n == I::one() {
-        return HashMap::new();
+pub trait CanFactorint: BaseInt + Factoring + std::hash::Hash {}
+impl<T> CanFactorint for T where T: BaseInt + Factoring + std::hash::Hash {}
+
+/// A factored representation of an integer
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Factored<I: CanFactorint = u64> {
+    pub facs: AHashMap<I, u32>,
+}
+
+impl<I: CanFactorint> Deref for Factored<I> {
+    type Target = AHashMap<I, u32>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.facs
     }
-    let facs: Vec<I> = n.clone().factor();
-    let mut out = HashMap::new();
-    if facs.is_empty() {
-        out.insert(n.clone(), 1);
-        return out;
+}
+
+impl<I: CanFactorint> Factored<I> {
+    pub fn new(n: impl Borrow<I>) -> Self {
+        let n: &I = n.borrow();
+        let mut out = AHashMap::new();
+        if *n == I::zero() || *n == I::one() {
+            return Self { facs: out };
+        }
+        let facs: Vec<I> = n.clone().factor();
+        if facs.is_empty() {
+            out.insert(n.clone(), 1);
+            return Self { facs: out };
+        }
+        let mut cur = facs[0].clone();
+        let mut count = 1u32;
+        for f in facs.iter().skip(1) {
+            if *f == cur {
+                count += 1;
+            } else {
+                out.insert(cur, count);
+                cur = f.clone();
+                count = 1;
+            }
+        }
+        out.insert(cur, count);
+        Self { facs: out }
     }
-    let mut cur = facs[0].clone();
-    let mut count = 1u32;
-    for f in facs.iter().skip(1) {
-        if *f == cur {
-            count += 1;
-        } else {
-            out.insert(cur, count);
-            cur = f.clone();
-            count = 1;
+
+    #[inline]
+    pub fn perfect_power_degree(&self) -> u32 {
+        if self.facs.is_empty() {
+            return 1;
+        } else if self.facs.len() == 1 {
+            return *self.facs.values().next().unwrap();
+        }
+        self.facs.values().cloned().reduce(gcd).unwrap()
+    }
+
+    //
+    // fn distinct_primes(&self) -> AHashSet<I> {
+    //     self.facs.keys().cloned().collect()
+    // }
+
+    pub fn φ(&self) -> Self {
+        // first, drop prime powers by one
+        let mut out = AHashMap::<I, u32>::with_capacity(self.len());
+        for (prime, pow) in self.facs.iter() {
+            if *pow > 1 {
+                out.insert(prime.clone(), *pow - 1);
+            }
+        }
+        let mut out = Self { facs: out };
+        for prime in self.keys() {
+            out *= Factored::<I>::new(&(prime.clone() - I::one()));
+        }
+        out
+    }
+}
+
+impl<I: CanFactorint, Rhs> Mul<Rhs> for Factored<I>
+where
+    Rhs: Borrow<Factored<I>>,
+{
+    type Output = Self;
+    #[allow(clippy::suspicious_arithmetic_impl)]
+    fn mul(self, rhs: Rhs) -> Self::Output {
+        let mut out = self.facs.clone();
+        for (fac, pow) in rhs.borrow().facs.iter() {
+            *out.entry(fac.clone()).or_insert(0) += pow;
+        }
+        Self { facs: out }
+    }
+}
+
+impl<I: CanFactorint, Rhs> MulAssign<Rhs> for Factored<I>
+where
+    Rhs: Borrow<Factored<I>>,
+{
+    #[allow(clippy::suspicious_op_assign_impl)]
+    fn mul_assign(&mut self, rhs: Rhs) {
+        for (fac, pow) in rhs.borrow().facs.iter() {
+            *self.facs.entry(fac.clone()).or_insert(0) += pow;
         }
     }
-    out.insert(cur, count);
-    out
+}
+
+impl<I: CanFactorint + MulAssign + Clone + Pow<u32, Output = I>> Factored<I> {
+    pub fn unfactor(&self) -> I {
+        let mut out = I::one();
+        for (fac, pow) in self.facs.iter() {
+            out *= fac.clone().pow(*pow);
+        }
+        out
+    }
 }
 
 pub fn divisors<I: BaseInt + Factoring + std::hash::Hash>(n: impl Borrow<I>) -> Vec<I> {
@@ -533,22 +637,23 @@ pub fn divisors<I: BaseInt + Factoring + std::hash::Hash>(n: impl Borrow<I>) -> 
         return out;
     }
 
-    let facs = factorint::<I>(n);
-    let mut cur_es = vec![0u32; facs.len()];
+    let factored = Factored::<I>::new(n);
+    let mut cur_es = vec![0u32; factored.len()];
 
     loop {
         out.push(
-            facs.keys()
+            factored
+                .keys()
                 .zip(cur_es.iter())
                 .map(|(p, e)| ipow::<I>(p, *e))
                 .fold(I::one(), |a, b| a * b),
         );
         let mut i = 0;
         loop {
-            if i >= facs.len() {
+            if i >= factored.len() {
                 return out;
             }
-            if cur_es[i] < *facs.values().nth(i).unwrap() {
+            if cur_es[i] < *factored.values().nth(i).unwrap() {
                 cur_es[i] += 1;
                 break;
             } else {
@@ -582,22 +687,18 @@ pub fn μ<I: BaseInt + Factoring>(n: impl Borrow<I>) -> i32 {
         }
         n_unique += 1;
     }
-    if n_unique % 2 == 1 { -1 } else { 1 }
+    if n_unique % 2 == 1 {
+        -1
+    } else {
+        1
+    }
 }
 
 /// Computes Euler's totient function
-pub fn φ<I: BaseInt + Factoring + Pow<u32, Output = I> + std::hash::Hash>(n: impl Borrow<I>) -> I {
-    let mut out = I::one();
-    if *n.borrow() == out {
-        return out;
-    }
-    for (fac, pow) in factorint::<I>(n) {
-        if pow > 1 {
-            out = out * fac.clone().pow(pow - 1);
-        }
-        out = out * (fac - I::one());
-    }
-    out
+pub fn φ<I: BaseInt + Factoring + MulAssign + Pow<u32, Output = I> + std::hash::Hash>(
+    n: impl Borrow<I>,
+) -> I {
+    Factored::<I>::new(n).φ().unfactor()
 }
 
 #[cfg(test)]
@@ -694,18 +795,18 @@ mod tests_fac {
     #[test]
     fn gcd_examples() {
         // (24,42,78,93) -> 3
-        let g1 = gcd::<i128>(24, 42);
-        let g2 = gcd::<i128>(g1, 78);
-        let g3 = gcd::<i128>(g2, 93);
+        let g1 = gcd_signed::<i128>(24, 42);
+        let g2 = gcd_signed::<i128>(g1, 78);
+        let g3 = gcd_signed::<i128>(g2, 93);
         assert_eq!(g3, 3);
 
         // gcd(117, -17883411) = 39
-        assert_eq!(gcd::<i128>(117, -17883411i128), 39);
+        assert_eq!(gcd_signed::<i128>(117, -17883411i128), 39);
 
         // gcd(3549, 70161, 336882, 702702) -> 273 (chain)
-        let g1 = gcd::<i128>(3549, 70161);
-        let g2 = gcd::<i128>(g1, 336_882);
-        let g3 = gcd::<i128>(g2, 702_702);
+        let g1 = gcd_signed::<i128>(3549, 70161);
+        let g2 = gcd_signed::<i128>(g1, 336_882);
+        let g3 = gcd_signed::<i128>(g2, 702_702);
         assert_eq!(g3, 273);
     }
 
@@ -745,7 +846,7 @@ mod tests_fac {
         assert!(!isprime::<i64>(9));
         assert!(!isprime::<i64>(100));
         assert!(isprime::<i64>(59)); // in TB_DEFAULT
-        // composites including Carmichael numbers
+                                     // composites including Carmichael numbers
         for &n in &[561i128, 1105, 1729, 2465, 2821, 6601] {
             assert!(!isprime::<i128>(n));
         }
@@ -772,12 +873,12 @@ mod tests_fac {
     #[test]
     fn test_factorint() {
         assert_eq!(
-            factorint::<u64>(360),
-            HashMap::from([(2, 3), (3, 2), (5, 1)])
+            Factored::new(360u64).facs,
+            AHashMap::from([(2, 3), (3, 2), (5, 1)])
         );
-        assert_eq!(factorint::<u64>(0), HashMap::new());
-        assert_eq!(factorint::<u64>(1), HashMap::new());
-        assert_eq!(factorint::<u64>(37), HashMap::from([(37, 1)]));
+        assert_eq!(Factored::new(0u64).facs, AHashMap::new());
+        assert_eq!(Factored::new(1u64).facs, AHashMap::new());
+        assert_eq!(Factored::new(37u64).facs, AHashMap::from([(37, 1)]));
     }
 
     #[test]

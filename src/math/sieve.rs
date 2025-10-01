@@ -175,7 +175,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::int::{divisors, factorint, φ};
+    use crate::int::{Factored, divisors, φ};
 
     use super::*;
 
@@ -194,9 +194,9 @@ mod tests {
             linear_sieve_completely_multiplicative::<_, DiscriminatedUnion, _>(n, |p| vec![p]);
         let expected: Vec<Vec<u64>> = (0..=n)
             .map(|n| {
-                let fac_map = factorint(n);
+                let fac_map = Factored::new(n);
                 let mut out = Vec::new();
-                for (p, e) in fac_map {
+                for (p, e) in fac_map.facs {
                     out.extend(std::iter::repeat_n(p, e as usize));
                 }
                 out.sort_unstable();
