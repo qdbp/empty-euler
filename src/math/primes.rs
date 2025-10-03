@@ -14,8 +14,9 @@ pub trait PG:
     Euclid + Zero + Clone + Mul<Output = Self> + Sub<Output = Self> + TryInto<u32> + From<u32>
 {
 }
-impl<T: Euclid + Zero + Clone + Mul<Output = Self> + Sub<Output = Self> + TryInto<u32> + From<u32>>
-    PG for T
+impl<
+        T: Euclid + Zero + Clone + Mul<Output = Self> + Sub<Output = Self> + TryInto<u32> + From<u32>,
+    > PG for T
 {
 }
 

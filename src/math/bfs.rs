@@ -200,7 +200,7 @@ impl<N: Eq, T: Ord> PartialOrd for BfsKey<N, T> {
     }
 }
 
-/// Performs breadth-first search over some dynamic tree-like node type N.
+/// Performs monotone breadth-first search over some dynamic tree-like node type N.
 pub struct Bfs<FVal, FGateXs, FGateVal, N, T>
 where
     N: BfsNode,
