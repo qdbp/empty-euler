@@ -24,6 +24,8 @@ pub trait BaseInt:
     + Mul<Output = Self>
     + Euclid
     + std::fmt::Debug
+    + Into<rug::Integer>
+    + TryFrom<rug::Integer>
 {
 }
 impl<T> BaseInt for T where
@@ -36,6 +38,8 @@ impl<T> BaseInt for T where
         + Mul<Output = T>
         + Euclid
         + std::fmt::Debug
+        + Into<rug::Integer>
+        + TryFrom<rug::Integer>
 {
 }
 
@@ -185,68 +189,28 @@ pub fn modinv<I: Int>(a: impl Borrow<I>, M: impl Borrow<I>) -> Option<I> {
     }
 }
 
-pub fn introot<I: Int>(n: impl Borrow<I>, r: u32) -> Option<I> {
-    if is_neg::<I>(n.borrow()) {
-        if r.is_multiple_of(2) {
-            return None;
-        }
-        let x = introot::<I>(&abs(n), r)?;
-        return Some(-x);
+pub fn introot<I: Clone + Into<rug::Integer> + TryFrom<rug::Integer>>(
+    n: impl Borrow<I>,
+    r: u32,
+) -> Option<I> {
+    let n_rug: rug::Integer = n.borrow().clone().into();
+    if r == 2 && n_rug < 0 {
+        None
+    } else {
+        Some(I::try_from(n_rug.root(r)).ok().unwrap())
     }
-
-    let n: &I = n.borrow();
-
-    if *n < c(2) {
-        return Some(n.clone());
-    }
-    if r == 1 {
-        return Some(n.clone());
-    }
-    if r == 2 {
-        // isqrt by doubling bound + binary search
-        let two = c::<I>(2);
-        let mut upper = I::one();
-        while ipow::<I>(&upper, 2) <= *n {
-            upper = upper * two.clone();
-        }
-        let mut lower = upper.div_euclid(&two);
-        while lower.clone() + I::one() < upper {
-            let mid = (lower.clone() + upper.clone()).div_euclid(&two);
-            let m2 = ipow::<I>(&mid, 2);
-            if m2 == *n {
-                return Some(mid);
-            }
-            if m2 < *n {
-                lower = mid;
-            } else {
-                upper = mid;
-            }
-        }
-        return Some(lower);
-    }
-    // generic r >= 3
-    let two = c::<I>(2);
-    let mut upper = I::one();
-    while ipow::<I>(&upper, r) <= *n {
-        upper = upper * two.clone();
-    }
-    let mut lower = upper.clone().div_euclid(&two);
-    while lower.clone() + I::one() < upper {
-        let mid = (lower.clone() + upper.clone()).div_euclid(&two);
-        let m = ipow::<I>(&mid, r);
-        if m == *n {
-            return Some(mid);
-        }
-        if m < *n {
-            lower = mid;
-        } else {
-            upper = mid;
-        }
-    }
-    Some(lower)
 }
 
-pub fn ispower_r<I: Int>(n: impl Borrow<I>, r: u32) -> Option<I> {
+/// Infallible specialization of introot to unsigned arguments.
+/// Goes through rug::Integer
+pub fn introot_u<I: Unsigned + Clone + Into<rug::Integer> + TryFrom<rug::Integer>>(
+    n: impl Borrow<I>,
+    r: u32,
+) -> I {
+    I::try_from(n.borrow().clone().into().root(r)).ok().unwrap()
+}
+
+pub fn ispower_r<I: BaseInt>(n: impl Borrow<I>, r: u32) -> Option<I> {
     let x = introot(n.borrow(), r)?;
     if ipow::<I>(&x, r) == *n.borrow() {
         Some(x)

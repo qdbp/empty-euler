@@ -16,6 +16,36 @@ pub struct Mono<const N: usize = 1> {
     pub exps: [u32; N],
 }
 
+impl<const N: usize> Mono<N> {
+    /// Creates a monomial from an array of exponents.
+    pub fn new(coefs: [u32; N]) -> Self {
+        Mono { exps: coefs }
+    }
+
+    /// Creates the multiplicative identity monomial (all exponents zero).
+    pub fn one() -> Self {
+        Mono { exps: [0u32; N] }
+    }
+
+    /// The degree of the monomial.
+    #[inline(always)]
+    pub fn deg(&self) -> u32 {
+        self.exps.iter().sum()
+    }
+
+    /// Checks if deg(self.x) <= deg(other.x) for all vars x
+    /// Can be used for pruning iterated products.
+    #[inline(always)]
+    fn all_leq(&self, other: &Self) -> bool {
+        (0..N).all(|i| self.exps[i] <= other.exps[i])
+    }
+
+    #[inline(always)]
+    fn all_le(&self, other: &Self) -> bool {
+        (0..N).all(|i| self.exps[i] < other.exps[i])
+    }
+}
+
 impl<const N: usize> PartialOrd for Mono<N> {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
@@ -42,24 +72,6 @@ impl<const N: usize> Ord for Mono<N> {
     }
 }
 
-impl<const N: usize> Mono<N> {
-    /// Creates a monomial from an array of exponents.
-    pub fn new(coefs: [u32; N]) -> Self {
-        Mono { exps: coefs }
-    }
-
-    /// Creates the multiplicative identity monomial (all exponents zero).
-    pub fn one() -> Self {
-        Mono { exps: [0u32; N] }
-    }
-
-    /// The degree of the monomial.
-    #[inline(always)]
-    pub fn deg(&self) -> u32 {
-        self.exps.iter().sum()
-    }
-}
-
 impl<const N: usize> Deref for Mono<N> {
     type Target = [u32; N];
     fn deref(&self) -> &Self::Target {
@@ -68,15 +80,26 @@ impl<const N: usize> Deref for Mono<N> {
 }
 
 // some sugar
-impl From<u32> for Mono<1> {
-    fn from(exp: u32) -> Self {
-        Mono { exps: [exp] }
-    }
-}
+// impl From<u32> for Mono<1> {
+//     fn from(exp: u32) -> Self {
+//         Mono { exps: [exp] }
+//     }
+// }
 
 impl From<Mono<1>> for u32 {
     fn from(m: Mono<1>) -> Self {
         m.exps[0]
+    }
+}
+
+impl<const N: usize, T> From<T> for Mono<N>
+where
+    T: Borrow<[u32; N]>,
+{
+    fn from(exps: T) -> Self {
+        Mono {
+            exps: exps.borrow().clone(),
+        }
     }
 }
 
@@ -126,6 +149,18 @@ pub struct Poly<T: PolyCoef = i32, const N: usize = 1> {
 impl<T: PolyCoef, const N: usize> Poly<T, N> {
     pub fn new() -> Self {
         Poly { terms: vec![] }
+    }
+
+    /// Accepts any vector of terms, including duplicates, zero coefficients, and out of order.
+    pub fn from_raw_terms(mut terms: Vec<Term<T, N>>) -> Self {
+        canonicalize_terms_inplace(&mut terms);
+        Poly { terms }
+    }
+
+    pub fn new_with_capacity(cap: usize) -> Self {
+        Poly {
+            terms: Vec::with_capacity(cap),
+        }
     }
 
     /// Parses a polynomial from a string.
@@ -214,19 +249,6 @@ impl<T: PolyCoef, const N: usize> Poly<T, N> {
         }
         Ok(Poly::from_raw_terms(terms))
     }
-
-    /// Accepts any vector of terms, including duplicates, zero coefficients, and out of order.
-    pub fn from_raw_terms(mut terms: Vec<Term<T, N>>) -> Self {
-        canonicalize_terms_inplace(&mut terms);
-        Poly { terms }
-    }
-
-    pub fn new_with_capacity(cap: usize) -> Self {
-        Poly {
-            terms: Vec::with_capacity(cap),
-        }
-    }
-
     /// Creates a monomial
     #[inline(always)]
     pub fn monomial(mono: impl Into<Mono<N>>, coef: impl Into<T>) -> Self {
@@ -242,6 +264,18 @@ impl<T: PolyCoef, const N: usize> Poly<T, N> {
     #[inline(always)]
     pub fn constant(coef: impl Into<T>) -> Self {
         Self::monomial(Mono::one(), coef)
+    }
+
+    /// Keeps only those terms whose degree for all variables does not exceed those in the given monomial.
+    /// ```rust
+    /// use pe_lib::math::poly::{Poly,Mono};
+    /// let mut p = Poly::<i32, 2>::parse("5 + x + 2xy + 3x^2y + 4xy^2 + 5x^2y^2").unwrap();
+    /// p.retain_terms_leq(&[1,2].into());
+    /// assert_eq!(p, Poly::<i32, 2>::parse("5 + x + 2xy + 4xy^2").unwrap());
+    /// ```
+    #[inline(always)]
+    pub fn retain_terms_leq(&mut self, max_mono: &Mono<N>) {
+        self.terms.retain(|term| term.mono.all_leq(max_mono));
     }
 }
 

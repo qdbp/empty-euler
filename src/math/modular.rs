@@ -1,6 +1,6 @@
-use num_traits::{One, Zero};
+use num_traits::{One, Pow, Zero};
 use std::fmt;
-use std::ops::AddAssign;
+use std::ops::{AddAssign, BitAnd, ShrAssign};
 /// Modular integer type ℤ/Nℤ
 /// We try to be generic and follow num_traits
 /// For now we hardcode u64 backing store
@@ -11,7 +11,8 @@ use std::{
     ops::{Add, Div, Mul, Neg, Rem, Sub},
 };
 
-use crate::int::{BaseInt, modinv_u};
+use crate::algo::expsq;
+use crate::int::{modinv_u, BaseInt};
 
 /// Modular integer type ℤ/Nℤ. There is no requirement that N be prime,
 ///
@@ -116,6 +117,17 @@ impl<const N: u64> Div for Z<N> {
     type Output = Self;
     fn div(self, rhs: Self) -> Self {
         Z::<N>((self.0 * modinv_u(rhs.0, N).expect("No modular inverse")) % N)
+    }
+}
+
+impl<const N: u64, Rhs> Pow<Rhs> for Z<N>
+where
+    Rhs: Clone + Zero + One + ShrAssign<u32> + for<'a> BitAnd<&'a Rhs, Output = Rhs> + Eq,
+{
+    type Output = Self;
+    #[inline(always)]
+    fn pow(self, exp: Rhs) -> Self {
+        expsq(self, exp)
     }
 }
 
