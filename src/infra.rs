@@ -1,7 +1,7 @@
 //! Satanic machinery in the back end keeps the front rooms spick and span
 //! We want a magic lightness. A childlike wonder. Freedom.
 //! The price is paid here -- enjoy your stay.
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 
 mod registry {
     include!(concat!(env!("OUT_DIR"), "/registry.rs"));
@@ -71,7 +71,7 @@ macro_rules! soln {
 
 #[macro_export]
 macro_rules! examples {
-    ( $( $( $it:expr ),* $(,)? => $val:tt ;)+) => {
+    ( $( $( $it:expr ),* $(,)? => $val:expr ;)+) => {
         #[cfg(test)]
         mod examples {
             use super::*;

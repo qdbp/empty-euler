@@ -1,5 +1,6 @@
+use num_traits::One;
 use rug::Integer as Int;
-use std::ops::{Add, Neg};
+use std::ops::{Add, AddAssign, Neg};
 
 use crate::partition::IntPartition;
 
@@ -109,6 +110,50 @@ impl<const N: usize> Neg for S<N> {
     }
 }
 
+#[inline]
+pub fn next_permutation<T: Ord>(a: &mut [T]) -> bool {
+    let n = a.len();
+    if n < 2 {
+        return false;
+    }
+
+    // 1) largest i with a[i] < a[i+1]
+    let Some(i) = (0..n - 1).rfind(|&i| a[i] < a[i + 1]) else {
+        return false;
+    };
+
+    // 2) largest j > i with a[i] < a[j]
+    let j = (i + 1..n).rfind(|&j| a[i] < a[j]).unwrap();
+
+    // 3) swap and 4) reverse suffix
+    a.swap(i, j);
+    a[i + 1..].reverse();
+    true
+}
+
+// TODO the min/cap here is a mess, should be generic over functions
+#[inline(always)]
+pub fn advance_asc_strict<T>(seq: &mut [T], cap: &T, min: &T) -> bool
+where
+    T: One + Ord + Clone,
+    for<'a> T: AddAssign<&'a T>,
+    for<'a> T: Add<&'a T, Output = T>,
+{
+    for i in 0..seq.len() {
+        if (i == seq.len() - 1 || T::one() + &seq[i] < seq[i + 1]) && seq[i] < *cap {
+            seq[i] += &T::one();
+            // reset sequence prefix
+            if i > 0 {
+                seq[0] = min.clone();
+                for j in 1..i {
+                    seq[j] = T::one() + &seq[j - 1];
+                }
+            }
+            return true;
+        }
+    }
+    false
+}
 #[cfg(test)]
 pub mod tests {
     use super::*;
@@ -145,5 +190,37 @@ pub mod tests {
         // (0 3 2 1) -> 4
         let p = S::new([3, 0, 1, 2]);
         assert_eq!(p.order(), Int::from(4));
+    }
+    #[test]
+    fn test_advance_asc_strict() {
+        let mut seq = vec![1u32, 2, 3];
+        let cap = 5u32;
+        assert!(advance_asc_strict(&mut seq, &cap, &1));
+        assert_eq!(seq, vec![1, 2, 4]);
+        assert!(advance_asc_strict(&mut seq, &cap, &1));
+        assert_eq!(seq, vec![1, 3, 4]);
+        assert!(advance_asc_strict(&mut seq, &cap, &1));
+        assert_eq!(seq, vec![2, 3, 4]);
+        assert!(advance_asc_strict(&mut seq, &cap, &1));
+        assert_eq!(seq, vec![1, 2, 5]);
+        assert!(advance_asc_strict(&mut seq, &cap, &1));
+        assert_eq!(seq, vec![1, 3, 5]);
+    }
+
+    #[test]
+    fn test_next_permutation() {
+        let mut v = vec![1, 2, 3];
+        assert!(next_permutation(&mut v));
+        assert_eq!(v, vec![1, 3, 2]);
+        assert!(next_permutation(&mut v));
+        assert_eq!(v, vec![2, 1, 3]);
+        assert!(next_permutation(&mut v));
+        assert_eq!(v, vec![2, 3, 1]);
+        assert!(next_permutation(&mut v));
+        assert_eq!(v, vec![3, 1, 2]);
+        assert!(next_permutation(&mut v));
+        assert_eq!(v, vec![3, 2, 1]);
+        assert!(!next_permutation(&mut v));
+        assert_eq!(v, vec![3, 2, 1]);
     }
 }

@@ -76,13 +76,18 @@ impl IntPartition {
     }
 
     /// Uses the AccelAsc algorithm to visit all partitions of n in ascending order.
-    pub fn visit_asc(n: u32, mut f: impl FnMut(&Self)) {
+    pub fn visit_asc<F>(n: u32, mut f: F)
+    where
+        F: FnMut(&Self),
+    {
         if n == 0 {
             f(&Self::new_unchecked(vec![]));
             return;
         }
 
         let mut a = Self::new_unchecked(vec![0u32; n as usize]);
+        let len = a.parts.len();
+
         let mut k = 1usize;
         let mut y: u32 = n - 1;
 
@@ -98,27 +103,32 @@ impl IntPartition {
             while x <= y {
                 a[k] = x;
                 a[t] = y;
-                a.parts.truncate(t + 1);
+                unsafe { a.parts.set_len(t + 1) }
                 f(&a);
+                unsafe { a.parts.set_len(len) }
                 x += 1;
                 y -= 1;
             }
             y += x - 1;
             a[k] = y + 1;
-            a.parts.truncate(k + 1);
+            unsafe { a.parts.set_len(k + 1) }
             f(&a);
+            unsafe { a.parts.set_len(len) }
         }
     }
 
     /// Generates all partitions of n in ascending order.
-    pub fn gen_acc(n: u32) -> Vec<Self> {
+    pub fn gen_asc(n: u32) -> Vec<Self> {
         let mut out = vec![];
         Self::visit_asc(n, |p| out.push(p.clone()));
         out
     }
 
     /// Uses the AccelAscDistinct algorithm to visit all partitions of n into distinct parts in ascending order.
-    pub fn visit_distinct_asc(n: u32, mut f: impl FnMut(&Self)) {
+    pub fn visit_distinct_asc<F>(n: u32, mut f: F)
+    where
+        F: FnMut(&Self),
+    {
         if n == 0 {
             f(&Self::new_unchecked(vec![]));
             return;
@@ -146,26 +156,17 @@ impl IntPartition {
             while x < y {
                 a[k] = x;
                 a[l] = y;
-
-                unsafe {
-                    a.parts.set_len(l + 1);
-                }
+                unsafe { a.parts.set_len(l + 1) }
                 f(&a);
-                unsafe {
-                    a.parts.set_len(len);
-                }
+                unsafe { a.parts.set_len(len) }
                 x += 1;
                 y -= 1;
             }
 
             a[k] = x + y;
-            unsafe {
-                a.parts.set_len(k + 1);
-            }
+            unsafe { a.parts.set_len(k + 1) }
             f(&a);
-            unsafe {
-                a.parts.set_len(len);
-            }
+            unsafe { a.parts.set_len(len) }
         }
     }
 
@@ -194,7 +195,7 @@ mod tests {
     use super::*;
     #[test]
     fn test_acc() {
-        let parts = IntPartition::gen_acc(5);
+        let parts = IntPartition::gen_asc(5);
         assert_eq!(parts.len(), 7);
         assert_eq!(parts[0], IntPartition::new_unchecked(vec![1, 1, 1, 1, 1]));
         assert_eq!(parts[1], IntPartition::new_unchecked(vec![1, 1, 1, 2]));
