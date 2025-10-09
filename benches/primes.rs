@@ -1,6 +1,6 @@
 use std::hint::black_box;
 
-use criterion::{Criterion, criterion_group, criterion_main};
+use criterion::{criterion_group, criterion_main, Criterion};
 
 fn bench_factoring_1m(c: &mut Criterion) {
     c.bench_function("100k_divisors", |b| {
@@ -14,7 +14,7 @@ fn bench_factoring_1m(c: &mut Criterion) {
     c.bench_function("100k_factorint", |b| {
         b.iter(|| {
             for n in (666..=1_337_000_000u64).step_by(13370) {
-                black_box(pe_lib::math::int::factorint(n));
+                black_box(pe_lib::math::int::Factored::new(n));
             }
         })
     });

@@ -3,7 +3,7 @@ use std::{
     ops::{Add, AddAssign, BitAnd, Mul, ShrAssign},
 };
 
-use num_traits::{Num, One, Zero};
+use num_traits::{One, Zero};
 
 use crate::int::introot_u;
 

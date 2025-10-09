@@ -11,4 +11,6 @@ pub mod partition;
 pub mod permutation;
 pub mod poly;
 pub mod primes;
+pub mod seq;
 pub mod sieve;
+pub mod util;

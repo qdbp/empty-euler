@@ -36,12 +36,12 @@ impl<const N: usize> Mono<N> {
     /// Checks if deg(self.x) <= deg(other.x) for all vars x
     /// Can be used for pruning iterated products.
     #[inline(always)]
-    fn all_leq(&self, other: &Self) -> bool {
+    pub fn all_leq(&self, other: &Self) -> bool {
         (0..N).all(|i| self.exps[i] <= other.exps[i])
     }
 
     #[inline(always)]
-    fn all_le(&self, other: &Self) -> bool {
+    pub fn all_le(&self, other: &Self) -> bool {
         (0..N).all(|i| self.exps[i] < other.exps[i])
     }
 }
@@ -98,7 +98,7 @@ where
 {
     fn from(exps: T) -> Self {
         Mono {
-            exps: exps.borrow().clone(),
+            exps: *exps.borrow(),
         }
     }
 }
