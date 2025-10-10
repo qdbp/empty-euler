@@ -1,3 +1,4 @@
+use ahash::AHashMap;
 use itertools::Itertools;
 use ndarray::{s, Array1, Array2};
 use num_traits::Euclid;
@@ -6,6 +7,17 @@ use rug::Integer as Int;
 use crate::math::util::int;
 
 type Mat = Array2<Int>;
+
+// Helper: y = M * x for augmented Int matrices
+fn dot_mat_vec(M: &Mat, x: &[Int]) -> Vec<Int> {
+    let mut y = vec![int(0); M.shape()[0]];
+    for i in 0..M.shape()[0] {
+        for j in 0..M.shape()[1] {
+            y[i] += &M[(i, j)] * &x[j];
+        }
+    }
+    y
+}
 
 /// a k-regular sequence
 /// Suppose a_{n*m + r} = Σ{j=0..=t} C_rj a_{m+j} + d_r, 0 <= r < n
@@ -21,8 +33,10 @@ type Mat = Array2<Int>;
 /// References
 pub struct KReg {
     basis: usize,
-    mats: Vec<Mat>,
-    seed: Vec<Int>,
+    pub mats: Vec<Mat>,
+    pub seed_by_digit: AHashMap<usize, Vec<Int>>,
+    // need to store this
+    pub a0: Int,
     // needed for summatory functions, where the block matrix formulation introducdes
     // a single-element lag.
     at_offset: usize,
@@ -39,7 +53,19 @@ impl KReg {
     /// to define all terms for the given C and d.
     ///
     /// We expect C to have shape (=N, <N), and d to have length N
+    ///
+    /// Note that seed should always be 0-indexed. Where the formal problem has initial index > 0,
+    /// dummy values should be supplied: the logic will be correct as long as the recurrence
+    /// indeed defines all terms >= the initial index.
     pub fn from_rec<T: Clone + Into<Int>>(c: Array2<T>, d: Array1<T>, seed: &[T]) -> Self {
+        // notes on how ix0 is handled:
+        // internally, we reindex so that a_{ix0} becomes a_0
+        // this way our `.at(n)` logic remains unchanged modulo the offset.
+        //
+        // during construction this means that we need to rotate the rows of C and d
+        // in addition to taking care during the seed extension, to produce zero-referenced
+        // set of matrices.
+        //
         let n = c.shape()[0];
         let t = c.shape()[1] - 1;
         let L = n + t;
@@ -49,12 +75,15 @@ impl KReg {
         let c: Array2<Int> = c.mapv(Into::into);
         let d: Array1<Int> = d.mapv(Into::into);
 
-        // + 1 for the affine part
         let mut mats = Vec::<Mat>::with_capacity(n);
+
+        // always 0-indexed internally even if a0, a1, ... is not defined
+        // we assume that the recurrence is well-defined for the given seed for all values past
+        // the last one given.
         let mut seed = seed.iter().cloned().map_into().collect_vec();
 
         // need to extend the seed to at least length t, just apply the recurrence directly here
-        for ix in seed.len()..L {
+        for ix in seed.len()..L + n {
             // seq_ix is the sequence-space index. residue computations involving r use this index,
             // not the vector index, which is just a storage detail.
             let row = ix % n;
@@ -66,64 +95,83 @@ impl KReg {
                     continue;
                 }
                 next += c_jr * &seed[base_ix + j];
-                next += &d[row];
             }
+            next += &d[row];
             seed.push(next);
         }
-        seed.push(int(1)); // homogeneous part
+
+        let seed_by_digit = (1..n)
+            .map(|digit| {
+                let mut sbd = seed[digit..(digit + L)].to_vec();
+                sbd.push(int(1)); // homogeneous part
+                (digit, sbd)
+            })
+            .collect();
 
         // the conversion of the C matrices into M for this simple case is routine
         // coordinate shuffling.
+        //
+        // we need to respect the internal reindexing: a_{ix0} became a_0, so any row with
+        // r = ix0 now must
         for r in 0..n {
             mats.push(Array2::<Int>::zeros((L + 1, L + 1)));
             let Mr = mats.last_mut().unwrap();
-            for row in 0..L {
-                let row_seq_ix = row;
-                let m_col = (r + row_seq_ix) / n;
-                let c_row = (r + row_seq_ix) % n;
+            for m_row in 0..L {
+                let m_col = (r + m_row) / n;
+                let c_row = (r + m_row) % n;
 
-                let mut target = Mr.slice_mut(s![row, m_col..=(m_col + t)]);
+                let mut target = Mr.slice_mut(s![m_row, m_col..=(m_col + t)]);
                 target.assign(&c.slice(s![c_row, ..]));
 
-                Mr[(row, L)] = d[c_row].clone();
+                Mr[(m_row, L)] = d[c_row].clone();
             }
             Mr[(L, L)] = Int::from(1);
         }
         Self {
             basis: n,
             mats,
-            seed,
+            seed_by_digit,
             at_offset: 0,
+            a0: seed[0].clone(),
         }
     }
 
     /// Computes a_n for the given n
     pub fn at(&self, n: usize) -> Int {
         let mut x = n + self.at_offset;
+        if x == 0 {
+            return self.a0.clone();
+        }
         let mut r: usize;
         let mut mats = vec![];
         let mut rs = vec![];
-        while x > 0 {
+        while x >= self.basis {
             (x, r) = x.div_rem_euclid(&self.basis);
             mats.push(&self.mats[r]);
             rs.push(r);
         }
         mats.reverse();
-        let mut s = self.seed.clone();
+        let mut s = self.seed_by_digit[&x].clone();
 
+        // println!("initial 0-indexed s[digit={x}] : {:?}", s);
+        //
         for m in mats {
             // can't use .dot because LinalgScalar : Copy lmao
-            let mut next_s = vec![int(0); s.len()];
-            for i in 0..s.len() {
-                for j in 0..s.len() {
-                    next_s[i] += &m[(i, j)] * &s[j];
-                }
-            }
-            s = next_s;
+            s = dot_mat_vec(m, &s);
+            // let mut next_s = vec![int(0); s.len()];
+            // for i in 0..s.len() {
+            //     for j in 0..s.len() {
+            //         next_s[i] += &m[(i, j)] * &s[j];
+            //     }
+            // }
+            // // println!("using mat:\n{}", m);
+            // // println!("  r={}: s={:?}", rs.pop().unwrap(), next_s);
+            // s = next_s;
         }
 
         s[0].clone()
     }
+
     /// Partial sums of k-regular sequences are also k-regular sequences.
     ///
     /// This method constructs the k-regular sequence `seq` to the summatory function such that
@@ -139,6 +187,27 @@ impl KReg {
             Bs.push(next);
         }
 
+        let state_len = w - 1;
+        let s1 = &self.seed_by_digit[&1];
+        let mut s0 = vec![self.a0.clone()];
+        s0.extend(s1[..state_len - 1].iter().cloned());
+        s0.push(int(1));
+
+        // add a constant offset term to correct for bias introduced by possibly-invalid a0
+        // when we work with 1-indexed sequences. this was a pain...
+        // the notation we use for the summatory state is [z(m); v(m)]
+        // where z is the top half and v is the bottom half
+        // K = C v(0) - sum_{i=0}^{k-1} v(i)
+        let cv0 = dot_mat_vec(&C, &s0);
+        let mut sum_vi = s0.clone();
+        for d in 1..self.basis {
+            let vd = &self.seed_by_digit[&d];
+            for i in 0..w {
+                sum_vi[i] += &vd[i];
+            }
+        }
+        let K: Vec<Int> = (0..w).map(|i| cv0[i].clone() - &sum_vi[i]).collect();
+
         // matrix layout for Mnew_r is:
         // [ C  B_r ]
         // [ 0  M_r ]
@@ -147,22 +216,46 @@ impl KReg {
                 let mut m = Mat::zeros((2 * w, 2 * w));
                 m.slice_mut(s![0..w, 0..w]).assign(&C);
                 m.slice_mut(s![0..w, w..(2 * w)]).assign(&Bs[i]);
+                for r in 0..w {
+                    // add K to the column for bottom's 1
+                    m[(r, w + (w - 1))] -= K[r].clone();
+                }
                 m.slice_mut(s![w..(2 * w), w..(2 * w)])
                     .assign(&self.mats[i]);
                 m
             })
             .collect_vec();
 
-        let new_seed = vec![int(0); w]
-            .into_iter()
-            .chain(self.seed.iter().cloned())
+        // z(1) = v(0) = s0, and for r>=2: z(r) = z(r-1) + v(r-1)
+        let mut z_prefix = vec![vec![int(0); w]; self.basis]; // index 0 unused
+        z_prefix[1] = s0.clone();
+        for r in 2..self.basis {
+            let mut acc = z_prefix[r - 1].clone();
+            let v_prev = &self.seed_by_digit[&(r - 1)];
+            for i in 0..w {
+                acc[i] += &v_prev[i];
+            }
+            z_prefix[r] = acc;
+        }
+
+        let new_seed_by_digit = (1..self.basis)
+            .map(|digit| {
+                // let top = dot_mat_vec(&Bs[digit], &s0);
+                let top = z_prefix[digit].clone();
+                let bottom = &self.seed_by_digit[&digit];
+                (
+                    digit,
+                    top.into_iter().chain(bottom.iter().cloned()).collect_vec(),
+                )
+            })
             .collect();
 
         Self {
             basis: self.basis,
             mats: new_mats.to_vec(),
-            seed: new_seed,
+            seed_by_digit: new_seed_by_digit,
             at_offset: self.at_offset + 1,
+            a0: int(0), // summatory is exclusive, so a0 = 0
         }
     }
 }
@@ -188,7 +281,7 @@ mod tests {
         assert_eq!(kreg.mats[0], m0_expected);
         assert_eq!(kreg.mats[1], m1_expected);
         // Check the seed
-        assert_eq!(kreg.seed, vec![int(0), int(1), int(1), int(1)]);
+        assert_eq!(kreg.seed_by_digit[&1], vec![int(1), int(1), int(2), int(1)]);
     }
 
     #[test]
@@ -212,12 +305,11 @@ mod tests {
         assert_eq!(kreg.mats[1], m1_expected);
 
         // Check the seed
-        assert_eq!(kreg.seed, vec![int(0), int(1), int(4), int(1)]);
+        assert_eq!(kreg.seed_by_digit[&1], vec![int(1), int(4), int(5), int(1)]);
     }
 
     #[test]
     fn test_kreg_at() {
-        // Example from Allouche-Shallit, Theorem 16.1.2
         // a_{2n} = a_n
         // a_{2n+1} = a_n + a_{n+1}
         let c = array![[1, 0], [1, 1]];
@@ -264,6 +356,12 @@ mod tests {
             .collect_vec();
         let kreg = KReg::from_rec(c, d, &seed);
         let sum_kreg = kreg.summatory();
+
+        println!("expected: {:?}", summatory_expected);
+        println!(
+            "computed: {:?}",
+            (0..20).map(|i| sum_kreg.at(i)).collect_vec()
+        );
 
         for (i, &e) in summatory_expected.iter().enumerate() {
             assert_eq!(sum_kreg.at(i), int(e), "mismatch at i={}", i);
