@@ -1,16 +1,19 @@
 // note: not num, we don't require div or mul here
-use ahash::AHashMap;
+mod factored;
+
+pub use factored::*;
+
 use core::ops::{Add, Sub};
 use facto::Factoring;
 use num_traits::{Euclid, One, Pow, Signed, Unsigned, Zero};
 use std::{
     borrow::Borrow,
-    ops::{Deref, Mul, MulAssign},
+    ops::{Mul, MulAssign},
 };
 
 use crate::{
     algo::expsq,
-    primes::{PrimeGen, PG},
+    primes::{CanPrimegen, PrimeGen},
 };
 pub trait BaseInt:
     Clone
@@ -219,7 +222,7 @@ pub fn ispower_r<I: BaseInt>(n: impl Borrow<I>, r: u32) -> Option<I> {
     }
 }
 
-pub fn ispower<I: Int, J: PG>(n: &I) -> Option<(I, u32)> {
+pub fn ispower<I: Int, J: CanPrimegen>(n: &I) -> Option<(I, u32)> {
     if *n == I::zero() || *n == I::one() || *n == -I::one() {
         return Some((n.clone(), 1));
     }
@@ -484,115 +487,6 @@ pub fn isprime<I: Int>(n: impl Borrow<I>) -> bool {
 pub trait CanFactorint: BaseInt + Factoring + std::hash::Hash {}
 impl<T> CanFactorint for T where T: BaseInt + Factoring + std::hash::Hash {}
 
-/// A factored representation of an integer
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Factored<I: CanFactorint = u64> {
-    pub facs: AHashMap<I, u32>,
-}
-
-impl<I: CanFactorint> Deref for Factored<I> {
-    type Target = AHashMap<I, u32>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.facs
-    }
-}
-
-impl<I: CanFactorint> Factored<I> {
-    pub fn new(n: impl Borrow<I>) -> Self {
-        let n: &I = n.borrow();
-        let mut out = AHashMap::new();
-        if *n == I::zero() || *n == I::one() {
-            return Self { facs: out };
-        }
-        let facs: Vec<I> = n.clone().factor();
-        if facs.is_empty() {
-            out.insert(n.clone(), 1);
-            return Self { facs: out };
-        }
-        let mut cur = facs[0].clone();
-        let mut count = 1u32;
-        for f in facs.iter().skip(1) {
-            if *f == cur {
-                count += 1;
-            } else {
-                out.insert(cur, count);
-                cur = f.clone();
-                count = 1;
-            }
-        }
-        out.insert(cur, count);
-        Self { facs: out }
-    }
-
-    #[inline]
-    pub fn perfect_power_degree(&self) -> u32 {
-        if self.facs.is_empty() {
-            return 1;
-        } else if self.facs.len() == 1 {
-            return *self.facs.values().next().unwrap();
-        }
-        self.facs.values().cloned().reduce(gcd).unwrap()
-    }
-
-    //
-    // fn distinct_primes(&self) -> AHashSet<I> {
-    //     self.facs.keys().cloned().collect()
-    // }
-
-    pub fn φ(&self) -> Self {
-        // first, drop prime powers by one
-        let mut out = AHashMap::<I, u32>::with_capacity(self.len());
-        for (prime, pow) in self.facs.iter() {
-            if *pow > 1 {
-                out.insert(prime.clone(), *pow - 1);
-            }
-        }
-        let mut out = Self { facs: out };
-        for prime in self.keys() {
-            out *= Factored::<I>::new(&(prime.clone() - I::one()));
-        }
-        out
-    }
-}
-
-impl<I: CanFactorint, Rhs> Mul<Rhs> for Factored<I>
-where
-    Rhs: Borrow<Factored<I>>,
-{
-    type Output = Self;
-    #[allow(clippy::suspicious_arithmetic_impl)]
-    fn mul(self, rhs: Rhs) -> Self::Output {
-        let mut out = self.facs.clone();
-        for (fac, pow) in rhs.borrow().facs.iter() {
-            *out.entry(fac.clone()).or_insert(0) += pow;
-        }
-        Self { facs: out }
-    }
-}
-
-impl<I: CanFactorint, Rhs> MulAssign<Rhs> for Factored<I>
-where
-    Rhs: Borrow<Factored<I>>,
-{
-    #[allow(clippy::suspicious_op_assign_impl)]
-    fn mul_assign(&mut self, rhs: Rhs) {
-        for (fac, pow) in rhs.borrow().facs.iter() {
-            *self.facs.entry(fac.clone()).or_insert(0) += pow;
-        }
-    }
-}
-
-impl<I: CanFactorint + MulAssign + Clone + Pow<u32, Output = I>> Factored<I> {
-    pub fn unfactor(&self) -> I {
-        let mut out = I::one();
-        for (fac, pow) in self.facs.iter() {
-            out *= fac.clone().pow(*pow);
-        }
-        out
-    }
-}
-
 pub fn divisors<I: BaseInt + Factoring + std::hash::Hash>(n: impl Borrow<I>) -> Vec<I> {
     let n = n.borrow();
     let mut out = vec![];
@@ -667,6 +561,8 @@ pub fn φ<I: BaseInt + Factoring + MulAssign + Pow<u32, Output = I> + std::hash:
 
 #[cfg(test)]
 mod tests_fac {
+    use ahash::AHashMap;
+
     use super::*;
 
     #[test]

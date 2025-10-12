@@ -63,6 +63,13 @@ where
     }
 }
 
+pub fn lazy<I, T>(src: I) -> LazyVec<I, T>
+where
+    I: Iterator<Item = T>,
+{
+    LazyVec::new(src)
+}
+
 impl<I, T: Clone> LazyVec<I, T>
 where
     I: Iterator<Item = T>,

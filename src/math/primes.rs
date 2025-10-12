@@ -10,19 +10,19 @@ use crate::iter::LazyVec;
 const INIT_PRIMES: &[u32] = &[2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47];
 const BASE_PRIMES: &[u32] = &[3, 5, 7];
 
-pub trait PG:
+pub trait CanPrimegen:
     Euclid + Zero + Clone + Mul<Output = Self> + Sub<Output = Self> + TryInto<u32> + From<u32>
 {
 }
 impl<
         T: Euclid + Zero + Clone + Mul<Output = Self> + Sub<Output = Self> + TryInto<u32> + From<u32>,
-    > PG for T
+    > CanPrimegen for T
 {
 }
 
 // first, we're going to steal primegen. as a token effort, we will compress the bitvector by 2
 // and we'll keep index state between segments
-struct PrimeGenSieve<T: PG> {
+struct PrimeGenSieve<T: CanPrimegen> {
     pl: Vec<u32>,
     // we persist per-prime indices to only do the modulo computation
     // once per prime
@@ -35,7 +35,7 @@ struct PrimeGenSieve<T: PG> {
     ix: usize,
 }
 
-impl<T: PG> PrimeGenSieve<T> {
+impl<T: CanPrimegen> PrimeGenSieve<T> {
     pub fn new() -> Self {
         let mut pg = Box::new(PrimeGen::<T>::new());
         for _ in 0..BASE_PRIMES.len() {
@@ -132,18 +132,18 @@ impl<T: PG> PrimeGenSieve<T> {
     }
 }
 
-enum PrimegenState<T: PG> {
+enum PrimegenState<T: CanPrimegen> {
     Init(usize),
     Segment(PrimeGenSieve<T>),
 }
 
 /// More or less a line-for-line re-implementation of labmath's primegen
 /// we'll tweak and benchmark it later
-pub struct PrimeGen<T: PG> {
+pub struct PrimeGen<T: CanPrimegen> {
     state: PrimegenState<T>,
 }
 
-impl<T: PG> PrimeGen<T> {
+impl<T: CanPrimegen> PrimeGen<T> {
     pub fn new() -> Self {
         PrimeGen {
             state: PrimegenState::Init(0),
@@ -151,13 +151,13 @@ impl<T: PG> PrimeGen<T> {
     }
 }
 
-impl<T: PG> Default for PrimeGen<T> {
+impl<T: CanPrimegen> Default for PrimeGen<T> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<T: PG> Iterator for PrimeGen<T> {
+impl<T: CanPrimegen> Iterator for PrimeGen<T> {
     type Item = T;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -189,16 +189,16 @@ impl<T: PG> Iterator for PrimeGen<T> {
     }
 }
 
-pub fn first_n_primes<T: PG>(n: usize) -> Vec<T> {
+pub fn first_n_primes<T: CanPrimegen>(n: usize) -> Vec<T> {
     PrimeGen::<T>::new().take(n).collect()
 }
 
-pub fn primes_leq<T: PG + Ord>(n: T) -> Vec<T> {
+pub fn primes_leq<T: CanPrimegen + Ord>(n: T) -> Vec<T> {
     PrimeGen::<T>::new().take_while(|p| *p <= n).collect()
 }
 
 /// A lazy vector v such that v.at(i) will be the ith prime (0-indexed)
-pub fn lazy_primes<T: PG>() -> LazyVec<PrimeGen<T>, T> {
+pub fn lazy_primes<T: CanPrimegen>() -> LazyVec<PrimeGen<T>, T> {
     LazyVec::new(PrimeGen::<T>::new())
 }
 

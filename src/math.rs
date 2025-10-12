@@ -7,6 +7,7 @@ pub mod int;
 pub mod iter;
 pub mod lp;
 pub mod modular;
+pub mod nim;
 pub mod partition;
 pub mod permutation;
 pub mod poly;

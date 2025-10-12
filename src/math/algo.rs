@@ -73,7 +73,7 @@ mod tests {
         assert_eq!(expsq(7u64, 1u64), 7u64);
         assert_eq!(expsq(7u64, 2u64), 49u64);
         assert_eq!(expsq(7u64, 3u64), 343u64);
-        assert_eq!(expsq(Z::<13>(7), 3u64), Z::<13>(5));
+        assert_eq!(expsq(Z::<13>::from(7), 3u64), Z::from(5));
     }
 
     #[test]

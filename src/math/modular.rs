@@ -1,6 +1,6 @@
-use num_traits::{One, Pow, Zero};
+use num_traits::{Euclid, One, Pow, Zero};
 use std::fmt;
-use std::ops::{AddAssign, BitAnd, ShrAssign};
+use std::ops::{AddAssign, BitAnd, DivAssign, MulAssign, ShrAssign, SubAssign};
 /// Modular integer type ℤ/Nℤ
 /// We try to be generic and follow num_traits
 /// For now we hardcode u64 backing store
@@ -12,22 +12,108 @@ use std::{
 };
 
 use crate::algo::expsq;
-use crate::int::{modinv_u, BaseInt};
+use crate::int::modinv_u;
 
 /// Modular integer type ℤ/Nℤ. There is no requirement that N be prime,
 ///
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(transparent)]
-pub struct Z<const N: u64>(pub u64);
+pub struct Z<const N: u64>(u64);
 
 impl<const N: u64> Z<N> {
     // TODO allow bigint moduli, can get nasty slow?
     const WIDE: bool = N > u32::MAX as u64;
 }
 
+impl<const N: u64> Z<N> {
+    pub fn factorial(n: u64) -> Self {
+        let mut out = Self::one();
+        for k in 2..=n {
+            out *= Self::from(k);
+        }
+        out
+    }
+}
+
+impl<const N: u64> From<Z<N>> for u64 {
+    fn from(x: Z<N>) -> Self {
+        x.0
+    }
+}
+
+macro_rules! from_impl {
+    ($ty:ty) => {
+        impl<const N: u64> From<$ty> for Z<N> {
+            #[inline]
+            fn from(x: $ty) -> Self {
+                // SAFETY: rem_euclid with N should always give an in-range value
+                let x_u64: u64 = x.rem_euclid(N as $ty) as u64;
+                Self(x_u64)
+            }
+        }
+    };
+}
+
+from_impl!(u8);
+from_impl!(u16);
+from_impl!(u32);
+from_impl!(u64);
+from_impl!(usize);
+from_impl!(u128);
+
+macro_rules! from_impl_signed {
+    ($ty:ty) => {
+        impl<const N: u64> From<$ty> for Z<N> {
+            #[inline]
+            fn from(x: $ty) -> Self {
+                let x_u64 = (x as i128).rem_euclid(N as i128) as u64;
+                Self(x_u64)
+            }
+        }
+    };
+}
+
+from_impl_signed!(i8);
+from_impl_signed!(i16);
+from_impl_signed!(i32);
+from_impl_signed!(i64);
+from_impl_signed!(isize);
+from_impl_signed!(i128);
+
+impl<const N: u64> From<rug::Integer> for Z<N> {
+    fn from(x: rug::Integer) -> Self {
+        // SAFETY: rem_euclid with N should always give an in-range value
+        let x_u64 = x.rem_euclid(&rug::Integer::from(N)).to_u64().unwrap();
+        Self(x_u64)
+    }
+}
+
+impl<const N: u64> Zero for Z<N> {
+    fn zero() -> Self {
+        Z::<N>(0)
+    }
+    fn is_zero(&self) -> bool {
+        self.0 == 0
+    }
+}
+
+impl<const N: u64> One for Z<N> {
+    fn one() -> Self {
+        Z::<N>(1 % N)
+    }
+}
 impl<const N: u64> Default for Z<N> {
     fn default() -> Self {
         Self::zero()
+    }
+}
+
+// ARITHMETIC OPS
+
+impl<const N: u64> Neg for Z<N> {
+    type Output = Self;
+    fn neg(self) -> Self {
+        Self(N - self.0 % N)
     }
 }
 
@@ -36,7 +122,8 @@ where
     Rhs: Borrow<Z<N>>,
 {
     fn add_assign(&mut self, rhs: Rhs) {
-        let (s, carry) = self.0.overflowing_add(rhs.borrow().0);
+        let rhs_u64: u64 = rhs.borrow().0;
+        let (s, carry) = self.0.overflowing_add(rhs_u64);
         let ge = (s >= N) as u64 | (carry as u64);
         // subtract m iff ge == 1
         self.0 = s.wrapping_sub(N & 0u64.wrapping_sub(ge))
@@ -55,10 +142,36 @@ where
     }
 }
 
-impl<const N: u64> Sub for Z<N> {
+impl<const N: u64, Rhs> SubAssign<Rhs> for Z<N>
+where
+    Rhs: Borrow<Z<N>>,
+{
+    fn sub_assign(&mut self, rhs: Rhs) {
+        *self += -(*rhs.borrow());
+    }
+}
+
+impl<const N: u64, Rhs> Sub<Rhs> for Z<N>
+where
+    Rhs: Borrow<Z<N>>,
+{
     type Output = Self;
-    fn sub(self, rhs: Self) -> Self {
-        Z::<N>((self.0 + N - rhs.0 % N) % N)
+    fn sub(self, rhs: Rhs) -> Self {
+        self + -(*rhs.borrow())
+    }
+}
+
+impl<const N: u64, Rhs> MulAssign<Rhs> for Z<N>
+where
+    Rhs: Borrow<Z<N>>,
+{
+    fn mul_assign(&mut self, rhs: Rhs) {
+        // if we fit into u32 we can never overflow u64
+        if !(Self::WIDE || rhs.borrow().0 > u32::MAX as u64) {
+            self.0 = (self.0 * rhs.borrow().0) % N
+        } else {
+            self.0 = ((self.0 as u128 * rhs.borrow().0 as u128) % (N as u128)) as u64
+        }
     }
 }
 
@@ -67,13 +180,27 @@ where
     Rhs: Borrow<Z<N>>,
 {
     type Output = Self;
+    #[inline(always)]
     fn mul(self, rhs: Rhs) -> Self {
-        // if we fit into u32 we can never overflow u64
-        if !Self::WIDE {
-            Z::<N>((self.0 * rhs.borrow().0) % N)
-        } else {
-            Z::<N>(((self.0 as u128 * rhs.borrow().0 as u128) % (N as u128)) as u64)
-        }
+        let mut out = self.clone();
+        out *= rhs.borrow();
+        out
+    }
+}
+
+impl<const N: u64> DivAssign for Z<N> {
+    fn div_assign(&mut self, rhs: Self) {
+        let inv = modinv_u(rhs.0, N).expect("No modular inverse");
+        *self *= Self(inv);
+    }
+}
+
+impl<const N: u64> Div for Z<N> {
+    type Output = Self;
+    #[inline(always)]
+    fn div(self, rhs: Self) -> Self {
+        let inv = modinv_u(rhs.0, N).expect("No modular inverse");
+        self * Self(inv)
     }
 }
 
@@ -81,42 +208,6 @@ impl<const N: u64> Rem for Z<N> {
     type Output = Self;
     fn rem(self, rhs: Self) -> Self {
         Z::<N>(self.0 % rhs.0)
-    }
-}
-
-impl<const N: u64> Neg for Z<N> {
-    type Output = Self;
-    fn neg(self) -> Self {
-        Z::<N>((N - self.0 % N) % N)
-    }
-}
-
-impl<const N: u64> PartialOrd for Z<N> {
-    #[inline]
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-impl<const N: u64> Ord for Z<N> {
-    #[inline]
-    fn cmp(&self, other: &Self) -> Ordering {
-        self.0.cmp(&other.0)
-    }
-}
-
-impl<const N: u64, Rhs: BaseInt + From<u64> + TryInto<u64>> From<Rhs> for Z<N> {
-    #[inline]
-    fn from(x: Rhs) -> Self {
-        // SAFETY: rem_euclid with N should always give an in-range value
-        let r = x.rem_euclid(&N.into()).try_into().ok().unwrap();
-        Self(r)
-    }
-}
-
-impl<const N: u64> Div for Z<N> {
-    type Output = Self;
-    fn div(self, rhs: Self) -> Self {
-        Z::<N>((self.0 * modinv_u(rhs.0, N).expect("No modular inverse")) % N)
     }
 }
 
@@ -131,21 +222,20 @@ where
     }
 }
 
-impl<const N: u64> Zero for Z<N> {
-    fn zero() -> Self {
-        Z::<N>(0)
-    }
-    fn is_zero(&self) -> bool {
-        self.0 == 0
+// ORDERING
+
+impl<const N: u64> PartialOrd for Z<N> {
+    #[inline]
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
     }
 }
-
-impl<const N: u64> One for Z<N> {
-    fn one() -> Self {
-        Z::<N>(1 % N)
+impl<const N: u64> Ord for Z<N> {
+    #[inline]
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.0.cmp(&other.0)
     }
 }
-
 impl<const N: u64> fmt::Display for Z<N> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.0)

@@ -1,4 +1,6 @@
 use num_traits::{Euclid, Zero};
+use rug::ops::Pow;
+use rug::Integer as Int;
 use std::ops::{self, Deref};
 
 /// Struct to store and manipulate the expansion of a given number in some base.
@@ -118,6 +120,15 @@ impl<const B: u32, const HINT: usize> Deref for Digits<B, HINT> {
     fn deref(&self) -> &Self::Target {
         &self.digs
     }
+}
+
+#[inline]
+pub fn repunit(n: u32) -> Int {
+    let mut out = Int::zero();
+    for pow in 0..n {
+        out += Int::from(10).pow(pow);
+    }
+    out
 }
 
 #[cfg(test)]
